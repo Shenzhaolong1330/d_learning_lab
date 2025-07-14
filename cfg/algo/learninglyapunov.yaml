@@ -1,0 +1,12 @@
+name: learninglyapunov
+
+train_every: 64
+
+lyapunov:
+  hidden_units: [256, 128, 64]
+  learning_rate: 0.0005
+  layer_norm: true
+  softplus: false # 是否在输出使用softplus函数，确保V(x)为正值
+
+learning:
+  GD_steps: 100
