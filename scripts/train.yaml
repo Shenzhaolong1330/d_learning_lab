@@ -4,7 +4,7 @@ hydra:
   # see https://hydra.cc/docs/advanced/search_path/
   # - file://../cfg
   - isaac-training/third_party/D_Learning/cfg
-headless: 0 # 是否显示isaac GUI
+headless: 1 # 是否显示isaac GUI
 physics_gpu: 0
 physics_engine: physx5
 
@@ -12,7 +12,7 @@ sim: ${task.sim} # 需要输入当前的task名：例如python xxxx task=Forest�
 env: ${task.env} # 同样在Forest.yaml中有env变量
 
 # total_frames: 150_000_000
-total_frames: 20000
+total_frames: 200000
 max_iters: -1
 eval_interval: -1
 save_interval: -1

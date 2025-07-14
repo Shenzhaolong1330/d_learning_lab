@@ -110,6 +110,8 @@ def main(cfg):
         # batch 指的是一次更新策略所使用的数据样本数量
         # print(data)
         info = {"env_frames": collector._frames, "rollout_fps": collector._fps}
+        run.log(info)
+
         episode_stats.add(data.to_tensordict())
         
         if len(episode_stats) >= env.num_envs:
@@ -124,7 +126,6 @@ def main(cfg):
         d_learning.train_dfunction(data, run)
         d_learning.policy_improvement(data, run)
 
-        run.log(info)
         # print(OmegaConf.to_yaml({k: v for k, v in info.items() if isinstance(v, float)}))
         pbar.set_postfix({"rollout_fps": collector._fps, "frames": collector._frames})
 

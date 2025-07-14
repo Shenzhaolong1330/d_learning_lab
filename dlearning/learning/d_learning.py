@@ -151,6 +151,21 @@ class DLearning(TensorDictModuleBase):
         self.dfun_opt = torch.optim.Adam(self.dfunction.parameters(), lr=cfg.algo.dfunction.learning_rate)
         self.ctrl_opt = torch.optim.Adam(self.controller.parameters(), lr=cfg.algo.controller.learning_rate)
 
+    def param_sum_square(self, net: nn.Module):
+        param_squares = [p ** 2 for p in net.parameters()]
+        return  sum(torch.sum(p) for p in param_squares)
+        
+    def dfunction_upper_bound_mean_variance_loss(self, dvalue):
+        """
+        """
+        positive_penalty = torch.sum(torch.relu(dvalue))
+        upper_bound = torch.max(dvalue)
+        lower_bound = torch.min(dvalue)
+        mean = torch.mean(dvalue)
+        variance = torch.var(dvalue)
+        # return upper_bound*100 + lower_bound*0 + mean*30 + variance*0 + positive_penalty*10
+        return upper_bound*10 + lower_bound*0 + mean*50 + variance*0 + positive_penalty*100
+
     def __call__(self, tensordict: TensorDict):
         # self.lyapunovfunction(tensordict)
         return tensordict
@@ -184,7 +199,7 @@ class DLearning(TensorDictModuleBase):
 
             SemiNegativeDefinite = torch.sum(F.relu(Vdot))
             PositiveDefinite = torch.sum(F.relu(-V))
-            loss = SemiNegativeDefinite + PositiveDefinite
+            loss = SemiNegativeDefinite + PositiveDefinite + self.param_sum_square(self.lyapunovfunction.module)
             loss.backward(retain_graph = True)
             with torch.no_grad(): 
                 self.lya_opt.step()
@@ -280,7 +295,7 @@ class DLearning(TensorDictModuleBase):
             total_D_count = torch.numel(D)
             positive_D_ratio = positive_D_count / total_D_count
 
-            loss = torch.sum(loss_fn(Vdot,D)) + torch.sum(D0**2)
+            loss = torch.sum(loss_fn(Vdot,D)) + torch.sum(D0**2) + self.param_sum_square(self.dfunction.module)
             loss.backward(retain_graph = True)
             with torch.no_grad(): 
                 self.dfun_opt.step()
@@ -314,10 +329,36 @@ class DLearning(TensorDictModuleBase):
     def policy_improvement(self, tensordict: TensorDict, run):
         print('---------------start improving policy----------------')
         loss_values = []
-        # for i in range(self.cfg.algo.learning.policy_GD_steps):
-        # print('before controller:', tensordict[("agents","action")][1][2])
-        # print('before controller .shape:', tensordict[("agents","action")].shape)
-        action = self.controller(tensordict)
-        # print('after controller:',self.controller(tensordict)[("agents","action")][1][2])
-        # print('after controller .shape:',self.controller(tensordict)[("agents","action")].shape)
+        for i in range(self.cfg.algo.learning.controller_GD_steps): 
+            # 置换掉tensordict中的action
+            tensordict = self.controller(tensordict)  
+            D = self.dfunction(tensordict)[('agents','dfunction_value')]
+            # print(D.shape)
+            positive_penalty = torch.sum(torch.relu(D))
+            upper_bound = torch.max(D)
+            mean = torch.mean(D)
+            loss = self.dfunction_upper_bound_mean_variance_loss(D) + self.param_sum_square(self.controller.module)
+            loss.backward(retain_graph = True)
+            with torch.no_grad(): 
+                self.ctrl_opt.step()
+                self.ctrl_opt.zero_grad()
+            loss_values.append(loss.item())
+
+            
+            positive_D_count = torch.sum(D > 0).float()
+            total_D_count = torch.numel(D)
+            positive_D_ratio = positive_D_count / total_D_count
+
+            step_info = {
+                "policy_improvement_loss": loss.item(),
+                "policy_improvement_positive_D_ratio":positive_D_ratio,
+                "policy_improvement_positive_penalty":positive_penalty,
+                "policy_improvement_upper_bound":upper_bound,
+                "policy_improvement_mean":mean,
+            }
+            run.log(step_info)
+
+        return {
+            "policy_improvement_idx": loss_values,
+        }
 

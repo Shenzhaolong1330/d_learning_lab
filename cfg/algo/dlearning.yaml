@@ -20,5 +20,5 @@ controller:
 
 learning:
   lyapunov_GD_steps: 400
-  dfunction_GD_steps: 200
-  controller_GD_steps: 200 
+  dfunction_GD_steps: 2000
+  controller_GD_steps: 100
