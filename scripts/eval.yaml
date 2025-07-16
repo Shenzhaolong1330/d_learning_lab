@@ -12,7 +12,7 @@ physics_engine: physx5
 # env: ${task.env} # 同样在Forest.yaml中有env变量
 
 # total_frames: 150_000_000
-total_frames: 300000
+total_frames: 20000
 max_iters: -1
 eval_interval: -1
 save_interval: -1
@@ -27,7 +27,7 @@ viewer:
 wandb:
   group: ${oc.select:..task.name}
   run_name: ${oc.select:..task.name,test}-${oc.select:..algo.name,none}
-  job_type: train
+  job_type: eval
   entity: rfly
   project: omnidrones
   # mode: disabled # set to 'disabled' when debugging locally
@@ -36,7 +36,7 @@ wandb:
   monitor_gym: True
   tags: 
 
-checkpoint_path: null
+checkpoint_path: swanlog/run-20250715_231017-94fcef66
 
 defaults:
   - task: DlearningHoverEnv
@@ -47,7 +47,7 @@ defaults:
 env:
   num_envs: 128
   env_spacing: 0
-  max_episode_length: 256
+  max_episode_length: 512
 
 sim:
   dt: 0.016

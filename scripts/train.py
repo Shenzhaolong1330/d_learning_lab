@@ -53,7 +53,6 @@ def main(cfg):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, project_root)
     from dlearning.envs.DlearningHoverEnv import DlearningHoverEnv
-    from dlearning.learning.learning_lyapunov import LearningLyapunov
     from dlearning.learning.d_learning import DLearning
     from dlearning.utils.controller_wrapper import ControllerWrapper
     
@@ -109,18 +108,19 @@ def main(cfg):
         # iteration 指的是训练过程中收集一个批次数据并更新策略的完整周期
         # batch 指的是一次更新策略所使用的数据样本数量
         # print(data)
-        info = {"env_frames": collector._frames, "rollout_fps": collector._fps}
-        run.log(info)
+        # info = {"env_frames": collector._frames, "rollout_fps": collector._fps}
+        # run.log(info)
 
+        data = data.detach().clone()
         episode_stats.add(data.to_tensordict())
         
-        if len(episode_stats) >= env.num_envs:
+        # if len(episode_stats) >= env.num_envs:
             # 判断 episode_stats 中收集的 episode 是不是大于 env.num_envs
-            stats = {
-                "train/" + (".".join(k) if isinstance(k, tuple) else k): torch.mean(v.float()).item() 
-                for k, v in episode_stats.pop().items(True, True)
-            }
-            info.update(stats)
+            # stats = {
+            #     "train/" + (".".join(k) if isinstance(k, tuple) else k): torch.mean(v.float()).item() 
+            #     for k, v in episode_stats.pop().items(True, True)
+            # }
+            # info.update(stats)
 
         d_learning.train_lyapunov(data, run)
         d_learning.train_dfunction(data, run)
@@ -128,6 +128,21 @@ def main(cfg):
 
         # print(OmegaConf.to_yaml({k: v for k, v in info.items() if isinstance(v, float)}))
         pbar.set_postfix({"rollout_fps": collector._fps, "frames": collector._frames})
+
+        try:
+            # 修改为使用 run.save_dir 属性
+            lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"lyapunovfunction_checkpoint_episode_{i+1}.pt")
+            dfunction_ckpt_path = os.path.join(run.public.run_dir, f"dfunction_checkpoint_episode_{i+1}.pt")
+            controller_ckpt_path = os.path.join(run.public.run_dir, f"controller_checkpoint_episode_{i+1}.pt")
+            torch.save(d_learning.lyapunovfunction.state_dict(), lyapunov_ckpt_path)
+            logging.info(f"Saved checkpoint to {str(lyapunov_ckpt_path)}")
+            torch.save(d_learning.dfunction.state_dict(), dfunction_ckpt_path)
+            logging.info(f"Saved checkpoint to {str(dfunction_ckpt_path)}")
+            torch.save(d_learning.controller.state_dict(), controller_ckpt_path)
+            logging.info(f"Saved checkpoint to {str(controller_ckpt_path)}")
+
+        except AttributeError:
+            logging.warning(f"LyapunovFunction {d_learning.lyapunovfunction} does not implement `.state_dict()`")
 
         if max_iters > 0 and i >= max_iters - 1:
             break 
@@ -147,17 +162,6 @@ def main(cfg):
 
     # d_learning.train_dfunction(trajs, run)
 
-    try:
-        # 修改为使用 run.save_dir 属性
-        lyapunov_ckpt_path = os.path.join(run.public.run_dir, "lyapunovfunction_checkpoint_final.pt")
-        dfunction_ckpt_path = os.path.join(run.public.run_dir, "dfunction_checkpoint_final.pt")
-        torch.save(d_learning.lyapunovfunction.state_dict(), lyapunov_ckpt_path)
-        logging.info(f"Saved checkpoint to {str(lyapunov_ckpt_path)}")
-        torch.save(d_learning.dfunction.state_dict(), dfunction_ckpt_path)
-        logging.info(f"Saved checkpoint to {str(dfunction_ckpt_path)}")
-
-    except AttributeError:
-        logging.warning(f"LyapunovFunction {d_learning.lyapunovfunction} does not implement `.state_dict()`")
 
     wandb.finish()
     simulation_app.close()

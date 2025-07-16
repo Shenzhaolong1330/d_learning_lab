@@ -6,7 +6,7 @@ defaults:
   - /base/sim_base@_here_
 
 env:
-  num_envs: 512
+  num_envs: 128
 
 drone_model: Hummingbird
 # drone_model: crazyflie

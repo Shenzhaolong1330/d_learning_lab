@@ -1,4 +1,6 @@
 # Copyright (c) 2025 Zhaolong Shen, Beihang University
+import os
+import logging
 
 import torch
 import torch.nn as nn
@@ -128,8 +130,39 @@ class DLearning(TensorDictModuleBase):
         self.controller(fake_observation)
         
         if self.cfg.checkpoint_path is not None:
-            state_dict = torch.load(self.cfg.checkpoint_path)
-            self.load_state_dict(state_dict, strict=False)
+            # 构建各个子模块的检查点路径
+            # lyapunov_ckpt_path = os.path.join(self.cfg.checkpoint_path, "lyapunovfunction_checkpoint_final.pt")
+            # dfunction_ckpt_path = os.path.join(self.cfg.checkpoint_path, "dfunction_checkpoint_final.pt")
+            # controller_ckpt_path = os.path.join(self.cfg.checkpoint_path, "controller_checkpoint_final.pt")
+
+            lyapunov_ckpt_path = os.path.join(self.cfg.checkpoint_path, "lyapunovfunction_checkpoint_episode_0.pt")
+            dfunction_ckpt_path = os.path.join(self.cfg.checkpoint_path, "dfunction_checkpoint_episode_0.pt")
+            controller_ckpt_path = os.path.join(self.cfg.checkpoint_path, "controller_checkpoint_episode_0.pt")
+
+            # 加载 LyapunovFunction 模块的参数
+            if os.path.exists(lyapunov_ckpt_path):
+                lyapunov_state_dict = torch.load(lyapunov_ckpt_path)
+                self.lyapunovfunction.load_state_dict(lyapunov_state_dict, strict=False)
+                logging.info(f"Loaded LyapunovFunction checkpoint from {lyapunov_ckpt_path}")
+            else:
+                logging.warning(f"LyapunovFunction checkpoint not found at {lyapunov_ckpt_path}")
+
+            # 加载 DFunction 模块的参数
+            if os.path.exists(dfunction_ckpt_path):
+                dfunction_state_dict = torch.load(dfunction_ckpt_path)
+                self.dfunction.load_state_dict(dfunction_state_dict, strict=False)
+                logging.info(f"Loaded DFunction checkpoint from {dfunction_ckpt_path}")
+            else:
+                logging.warning(f"DFunction checkpoint not found at {dfunction_ckpt_path}")
+
+            # 加载 ControllerFunction 模块的参数
+            if os.path.exists(controller_ckpt_path):
+                controller_state_dict = torch.load(controller_ckpt_path)
+                self.controller.load_state_dict(controller_state_dict, strict=False)
+                logging.info(f"Loaded ControllerFunction checkpoint from {controller_ckpt_path}")
+            else:
+                logging.warning(f"ControllerFunction checkpoint not found at {controller_ckpt_path}")
+
         else:
             def mini_init_(module):
                 if isinstance(module, nn.Linear):
@@ -164,10 +197,11 @@ class DLearning(TensorDictModuleBase):
         mean = torch.mean(dvalue)
         variance = torch.var(dvalue)
         # return upper_bound*100 + lower_bound*0 + mean*30 + variance*0 + positive_penalty*10
-        return upper_bound*10 + lower_bound*0 + mean*50 + variance*0 + positive_penalty*100
+        return upper_bound*0 + lower_bound*0 + mean*0 + variance*0 + positive_penalty*100
 
     def __call__(self, tensordict: TensorDict):
         # self.lyapunovfunction(tensordict)
+        self.controller(tensordict)
         return tensordict
 
     def train_lyapunov(self, tensordict: TensorDict, run):
@@ -199,7 +233,7 @@ class DLearning(TensorDictModuleBase):
 
             SemiNegativeDefinite = torch.sum(F.relu(Vdot))
             PositiveDefinite = torch.sum(F.relu(-V))
-            loss = SemiNegativeDefinite + PositiveDefinite + self.param_sum_square(self.lyapunovfunction.module)
+            loss = SemiNegativeDefinite + PositiveDefinite + self.param_sum_square(self.lyapunovfunction.module) * 0.1
             loss.backward(retain_graph = True)
             with torch.no_grad(): 
                 self.lya_opt.step()
@@ -211,19 +245,19 @@ class DLearning(TensorDictModuleBase):
             # 记录当前步骤的信息到 SwanLab
             step_info = {
                 "lyapunov_loss": loss.item(),
-                "semi_negative_definite": SemiNegativeDefinite.item(),
-                "positive_definite": PositiveDefinite.item(),
-                "negative_V_ratio":negative_V_ratio,
-                "positive_Vdot_ratio":positive_Vdot_ratio,
+                "lyapunov_semi_negative_definite": SemiNegativeDefinite.item(),
+                "lyapunov_positive_definite": PositiveDefinite.item(),
+                "lyapunov_negative_V_ratio":negative_V_ratio,
+                "lyapunov_positive_Vdot_ratio":positive_Vdot_ratio,
             }
             run.log(step_info)
 
         return {
             "lyapunov_loss": loss_values,
-            "semi_negative_definite": semi_negative_definite_values,
-            "positive_definite": positive_definite_values,
-            "negative_V_ratio":negative_V_ratio,
-            "positive_Vdot_ratio":positive_Vdot_ratio,
+            "lyapunov_semi_negative_definite": semi_negative_definite_values,
+            "lyapunov_positive_definite": positive_definite_values,
+            "lyapunov_negative_V_ratio":negative_V_ratio,
+            "lyapunov_positive_Vdot_ratio":positive_Vdot_ratio,
         }
 
     def eval_lyapunov(self, tensordict: TensorDict, run):
@@ -249,27 +283,27 @@ class DLearning(TensorDictModuleBase):
 
         SemiNegativeDefinite = torch.sum(F.relu(Vdot))
         PositiveDefinite = torch.sum(F.relu(-V))
-        loss = SemiNegativeDefinite + PositiveDefinite
+        loss = SemiNegativeDefinite + PositiveDefinite + torch.sum(V0**2)
         loss_values = loss.item()
         semi_negative_definite_values = SemiNegativeDefinite.item()
         positive_definite_values = PositiveDefinite.item()
 
         # 记录当前步骤的信息到 SwanLab
         eval_info = {
-            "eval_lyapunov_loss": loss_values,
-            "eval_semi_negative_definite": semi_negative_definite_values,
-            "eval_positive_definite": positive_definite_values,
-            "eval_negative_V_ratio":negative_V_ratio,
-            "eval_positive_Vdot_ratio":positive_Vdot_ratio,
+            "lyapunov_eval_loss": loss_values,
+            "lyapunov_eval_semi_negative_definite": semi_negative_definite_values,
+            "lyapunov_eval_positive_definite": positive_definite_values,
+            "lyapunov_eval_negative_V_ratio":negative_V_ratio,
+            "lyapunov_eval_positive_Vdot_ratio":positive_Vdot_ratio,
         }
         run.log(eval_info)
 
         return {
-            "eval_lyapunov_loss": loss_values,
-            "eval_semi_negative_definite": semi_negative_definite_values,
-            "eval_positive_definite": positive_definite_values,
-            "eval_negative_V_ratio":negative_V_ratio,
-            "eval_positive_Vdot_ratio":positive_Vdot_ratio,
+            "lyapunov_eval_loss": loss_values,
+            "lyapunov_eval_semi_negative_definite": semi_negative_definite_values,
+            "lyapunov_eval_positive_definite": positive_definite_values,
+            "lyapunov_eval_negative_V_ratio":negative_V_ratio,
+            "lyapunov_eval_positive_Vdot_ratio":positive_Vdot_ratio,
         }
 
     def train_dfunction(self, tensordict: TensorDict, run):
@@ -285,6 +319,7 @@ class DLearning(TensorDictModuleBase):
         V = self.lyapunovfunction(tensordict)[("agents", "lyapunov_value")]
         V_ = self.lyapunovfunction(next_tensordict)[("agents", "lyapunov_value")]
         Vdot = (V_ - V) / dt
+
         loss_values = []
         loss_fn = nn.MSELoss()
         for i in range(self.cfg.algo.learning.dfunction_GD_steps):
@@ -295,7 +330,8 @@ class DLearning(TensorDictModuleBase):
             total_D_count = torch.numel(D)
             positive_D_ratio = positive_D_count / total_D_count
 
-            loss = torch.sum(loss_fn(Vdot,D)) + torch.sum(D0**2) + self.param_sum_square(self.dfunction.module)
+            fitting_loss = torch.sum(loss_fn(Vdot,D)) + torch.sum(D0**2)
+            loss = fitting_loss + self.param_sum_square(self.dfunction.module) * 0.1
             loss.backward(retain_graph = True)
             with torch.no_grad(): 
                 self.dfun_opt.step()
@@ -303,7 +339,8 @@ class DLearning(TensorDictModuleBase):
             loss_values.append(loss.item())
             step_info = {
                 "dfunction_loss": loss.item(),
-                "positive_D_ratio":positive_D_ratio,
+                "dfunction_fitting_loss":fitting_loss.item(),
+                "dfunction_positive_D_ratio":positive_D_ratio,
             }
             run.log(step_info)
 
@@ -313,17 +350,37 @@ class DLearning(TensorDictModuleBase):
 
     def eval_dfunction(self, tensordict: TensorDict, run):
         print('---------------start evaluating dfunction----------------')
+        
+        fake_observation = self.observation_spec.zero()
+        fake_action = self.action_spec.zero()
+        if not isinstance(fake_action, TensorDict):
+            fake_action = TensorDict({"agents": {"action": fake_action}}, batch_size=fake_action.shape[:-1])
+        fake_observation = fake_observation.update(fake_action)
+        D0 = self.dfunction(fake_observation)[('agents','dfunction_value')]
+
+        dt = self.cfg.sim.dt
+        next_tensordict = tensordict["next"]
+        V = self.lyapunovfunction(tensordict)[("agents", "lyapunov_value")]
+        V_ = self.lyapunovfunction(next_tensordict)[("agents", "lyapunov_value")]
+        Vdot = (V_ - V) / dt
+
         D = self.dfunction(tensordict)[('agents','dfunction_value')]
+        loss_fn = nn.MSELoss()
+        fitting_loss = torch.sum(loss_fn(Vdot,D)) + torch.sum(D0**2)
+
         positive_D_count = torch.sum(D > 0).float()
         total_D_count = torch.numel(D)
         positive_D_ratio = positive_D_count / total_D_count
+
         eval_info = {
-            "eval_positive_D_ratio":positive_D_ratio,
+            "dfunction_eval_fitting_loss":fitting_loss.item(),
+            "dfunction_eval_positive_D_ratio":positive_D_ratio,
         }
         run.log(eval_info)
 
         return {
-            "eval_positive_D_ratio":positive_D_ratio,
+            "dfunction_eval_fitting_loss":fitting_loss.item(),
+            "dfunction_eval_positive_D_ratio":positive_D_ratio,
         }
 
     def policy_improvement(self, tensordict: TensorDict, run):
@@ -337,14 +394,13 @@ class DLearning(TensorDictModuleBase):
             positive_penalty = torch.sum(torch.relu(D))
             upper_bound = torch.max(D)
             mean = torch.mean(D)
-            loss = self.dfunction_upper_bound_mean_variance_loss(D) + self.param_sum_square(self.controller.module)
+            loss = self.dfunction_upper_bound_mean_variance_loss(D) + self.param_sum_square(self.controller.module) * 0.1
             loss.backward(retain_graph = True)
             with torch.no_grad(): 
                 self.ctrl_opt.step()
                 self.ctrl_opt.zero_grad()
             loss_values.append(loss.item())
 
-            
             positive_D_count = torch.sum(D > 0).float()
             total_D_count = torch.numel(D)
             positive_D_ratio = positive_D_count / total_D_count
@@ -359,6 +415,6 @@ class DLearning(TensorDictModuleBase):
             run.log(step_info)
 
         return {
-            "policy_improvement_idx": loss_values,
+            "policy_improvement_loss": loss_values,
         }
 
