@@ -20,8 +20,8 @@ seed: 0
 
 viewer:
   resolution: [960, 720]
-  eye: [8, 0., 6.]
-  lookat: [0., 0., 1.]
+  eye: [8, 0., 12.]
+  lookat: [0., 0., 8.]
 
 # oc.select: https://omegaconf.readthedocs.io/en/2.1_branch/custom_resolvers.html#oc-decode
 wandb:
@@ -36,7 +36,9 @@ wandb:
   monitor_gym: True
   tags: 
 
-checkpoint_path: swanlog/run-20250715_231017-94fcef66
+checkpoint_path: swanlog/run-20250722_152852-5964c6c9
+# checkpoint_path: 
+checkpoint_episode: 21
 
 defaults:
   - task: DlearningHoverEnv
@@ -45,7 +47,7 @@ defaults:
   - _self_
 
 env:
-  num_envs: 128
+  num_envs: 16
   env_spacing: 0
   max_episode_length: 512
 

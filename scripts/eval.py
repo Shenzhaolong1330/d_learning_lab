@@ -46,13 +46,16 @@ def main(cfg):
     OmegaConf.set_struct(cfg, False)
     simulation_app = init_simulation_app(cfg)
 
+    run = init_wandb(cfg)
+
     print(OmegaConf.to_yaml(cfg))
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, project_root)
     from dlearning.envs.DlearningHoverEnv import DlearningHoverEnv
     from dlearning.learning.d_learning import DLearning
-    
+    from dlearning.utils.controller_wrapper import ControllerWrapper
+
     print('-----------Create ',cfg.task.name,'------------')
     env = DlearningHoverEnv(cfg = cfg, headless = cfg.headless)
     env.set_seed(cfg.seed)
@@ -73,17 +76,28 @@ def main(cfg):
         break_when_any_done=False,
         return_contiguous=False,
     )
-    dfunctionvalue = policy.dfunction(trajs)[("agents", "dfunction_value")]
-    print('sum(dfunctionvalue): ',sum(dfunctionvalue))
+    
+    policy.eval_lyapunov(trajs, run)
+    print(trajs["agents"]["action"])
 
-    positive_D_count = torch.sum(dfunctionvalue > 0).float()
-    total_D_count = torch.numel(dfunctionvalue)
-    positive_D_ratio = positive_D_count / total_D_count
-    print('positive_D_ratio: ',positive_D_ratio)
+    # policy1 = LeePositionController(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
+    # wrapped_policy = ControllerWrapper(policy1)
+
+    # trajs = env.rollout(
+    #     max_steps=env.max_episode_length,
+    #     policy=wrapped_policy,
+    #     auto_reset=True,
+    #     break_when_any_done=False,
+    #     return_contiguous=False,
+    # )
+
+    # policy.eval_lyapunov(trajs, run)
+    # print(trajs["agents"]["action"])
 
     env.enable_render(not cfg.headless)
     env.reset()
 
+    wandb.finish()
     simulation_app.close()
 
 

@@ -117,24 +117,36 @@ class DlearningHoverEnv(IsaacEnv):
         self.init_poses = self.drone.get_world_poses(clone=True)
         self.init_vels = torch.zeros_like(self.drone.get_velocities())
 
-        self.init_pos_dist = D.Uniform(
-            torch.tensor([-1.5, -1.5, 2.5], device=self.device),
-            torch.tensor([1.5, 1.5, 0.5], device=self.device)
-        )
         # self.init_pos_dist = D.Uniform(
-        #     torch.tensor([0.0, 0.0, 2], device=self.device),
-        #     torch.tensor([0.0, 0.0, 2], device=self.device)
+        #     torch.tensor([-0.5, -0.5, 8.5], device=self.device),
+        #     torch.tensor([0.5, 0.5, 7.5], device=self.device)
+        # )
+        # self.init_pos_dist = D.Uniform(
+        #     torch.tensor([-1.5, -1.5, 8.5], device=self.device),
+        #     torch.tensor([1.5, 1.5, 7.5], device=self.device)
+        # )
+        self.init_pos_dist = D.Uniform(
+            torch.tensor([-1.8, -1.8, 6.2], device=self.device),
+            torch.tensor([1.8, 1.8, 9.8], device=self.device)
+        )
+        # self.init_rpy_dist = D.Uniform(
+        #     torch.tensor([-.2, -.2, 0.], device=self.device) * torch.pi,
+        #     torch.tensor([0.2, 0.2, 0.], device=self.device) * torch.pi
         # )
         self.init_rpy_dist = D.Uniform(
-            torch.tensor([-.2, -.2, 2.], device=self.device) * torch.pi,
-            torch.tensor([0.2, 0.2, 2.], device=self.device) * torch.pi
+            torch.tensor([-.5, -.5, 0.], device=self.device) * torch.pi,
+            torch.tensor([0.5, 0.5, 0.], device=self.device) * torch.pi
         )
+        # self.init_rpy_dist = D.Uniform(
+        #     torch.tensor([0., 0., 0.], device=self.device) * torch.pi,
+        #     torch.tensor([0., 0., 0.], device=self.device) * torch.pi
+        # )
         self.target_rpy_dist = D.Uniform(
-            torch.tensor([0., 0., 2.], device=self.device) * torch.pi,
-            torch.tensor([0., 0., 2.], device=self.device) * torch.pi
+            torch.tensor([0., 0., 0.], device=self.device) * torch.pi,
+            torch.tensor([0., 0., 0.], device=self.device) * torch.pi
         )
 
-        self.target_pos = torch.tensor([[0.0, 0.0, 2.0]], device=self.device)
+        self.target_pos = torch.tensor([[0.0, 0.0, 8.0]], device=self.device)
         self.target_heading = torch.zeros(self.num_envs, 1, 3, device=self.device)
         self.alpha = 0.8
 
@@ -149,7 +161,7 @@ class DlearningHoverEnv(IsaacEnv):
         target_vis_prim = prim_utils.create_prim(
             prim_path="/World/envs/env_0/target",
             usd_path=self.drone.usd_path,
-            translation=(0.0, 0.0, 2.),
+            translation=(0.0, 0.0, 8.),
         )
 
         kit_utils.set_nested_collision_properties(
@@ -167,7 +179,7 @@ class DlearningHoverEnv(IsaacEnv):
             dynamic_friction=1.0,
             restitution=0.0,
         )
-        drone_prim = self.drone.spawn(translations=[(0.5, 0.5, 2.)])[0]
+        drone_prim = self.drone.spawn(translations=[(0.5, 0.5, 8.)])[0]
         if self.has_payload:
             attach_payload(drone_prim.GetPath().pathString)
         return ["/World/defaultGroundPlane"]
@@ -228,7 +240,6 @@ class DlearningHoverEnv(IsaacEnv):
         self.stats = stats_spec.zero()
         self.info = info_spec.zero()
 
-
     def _reset_idx(self, env_ids: torch.Tensor):
         self.drone._reset_idx(env_ids, self.training)
         
@@ -261,10 +272,58 @@ class DlearningHoverEnv(IsaacEnv):
         self.target_vis.set_world_poses(orientations=target_rot, env_indices=env_ids)
 
         self.stats[env_ids] = 0.
+    
+
+    def compute_parameters(
+        self,
+        rotor_config,
+        inertia_matrix,
+    ):
+        rotor_angles = torch.as_tensor(rotor_config["rotor_angles"])
+        arm_lengths = torch.as_tensor(rotor_config["arm_lengths"])
+        force_constants = torch.as_tensor(rotor_config["force_constants"])
+        moment_constants = torch.as_tensor(rotor_config["moment_constants"])
+        directions = torch.as_tensor(rotor_config["directions"])
+        max_rot_vel = torch.as_tensor(rotor_config["max_rotation_velocities"])
+        A = torch.stack(
+            [
+                torch.sin(rotor_angles) * arm_lengths,
+                -torch.cos(rotor_angles) * arm_lengths,
+                -directions * moment_constants / force_constants,
+                torch.ones_like(rotor_angles),
+            ]
+        )
+        mixer = A.T @ (A @ A.T).inverse() @ inertia_matrix
+
+        return mixer
+
+    # def _pre_sim_step(self, tensordict: TensorDictBase):
+    #     actions是油门
+    #     actions = tensordict[("agents", "action")]
+    #     self.effort = self.drone.apply_action(actions)
 
     def _pre_sim_step(self, tensordict: TensorDictBase):
         actions = tensordict[("agents", "action")]
-        self.effort = self.drone.apply_action(actions)
+        # actions是力和力矩
+        uav_params = self.drone.params
+        rotor_config = uav_params["rotor_configuration"]
+        inertia = uav_params["inertia"]
+        I = torch.diag_embed(
+            torch.tensor([inertia["xx"], inertia["yy"], inertia["zz"], 1])
+        )
+        mixer = torch.nn.Parameter(self.compute_parameters(rotor_config, I)).to(self.device)
+        # print(mixer.shape)
+        # print(actions.shape)
+        cmd = (mixer @ actions.squeeze(1).T).T.unsqueeze(1)
+        # print(cmd.shape)
+
+        force_constants = torch.as_tensor(rotor_config["force_constants"])
+        max_rot_vel = torch.as_tensor(rotor_config["max_rotation_velocities"])
+        max_thrusts = torch.nn.Parameter(max_rot_vel.square() * force_constants).to(self.device)
+
+        cmd = (cmd / max_thrusts) * 2 - 1
+
+        self.effort = self.drone.apply_action(cmd)
 
     def _compute_state_and_obs(self):
         self.root_state = self.drone.get_state()

@@ -39,6 +39,16 @@ from torchrl.envs.transforms import TransformedEnv, InitTracker, Compose
 FILE_PATH = os.path.dirname(__file__)
 
 
+def make_batch(tensordict: TensorDict, num_minibatches: int):
+    tensordict = tensordict.reshape(-1) # 把所有的前两个dimension合并成为batch
+    perm = torch.randperm(
+        (tensordict.shape[0] // num_minibatches) * num_minibatches,
+        device=tensordict.device,
+    ).reshape(num_minibatches, -1)
+    for indices in perm:
+        yield tensordict[indices]
+
+
 @hydra.main(config_path=FILE_PATH, config_name="train", version_base=None)
 def main(cfg):
     OmegaConf.register_new_resolver("eval", eval)
@@ -61,11 +71,7 @@ def main(cfg):
     env.set_seed(cfg.seed)
 
     policy = LeePositionController(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
-
-    # 封装控制器
     wrapped_policy = ControllerWrapper(policy)
-
-    # print('env.action_spec: ',env.action_spec)
 
     d_learning = DLearning(cfg, env.observation_spec, env.action_spec, env.device)
 
@@ -98,7 +104,7 @@ def main(cfg):
     )
 
     pbar = tqdm(collector)
-    env.train()
+    # env.train()
     print('------------start training-------------')
     for i, data in enumerate(pbar):
         # 这里有一个batch的数据 frames_per_batch = env.num_envs * env.max_episode_length
@@ -121,47 +127,60 @@ def main(cfg):
             #     for k, v in episode_stats.pop().items(True, True)
             # }
             # info.update(stats)
-
-        d_learning.train_lyapunov(data, run)
-        d_learning.train_dfunction(data, run)
-        d_learning.policy_improvement(data, run)
+        batch = make_batch(data, cfg.num_minibatches)
+        for minibatch in batch:
+            d_learning.train_lyapunov(minibatch, run)
+            d_learning.train_dfunction(minibatch, run)
+            d_learning.policy_improvement(minibatch, run)
 
         # print(OmegaConf.to_yaml({k: v for k, v in info.items() if isinstance(v, float)}))
         pbar.set_postfix({"rollout_fps": collector._fps, "frames": collector._frames})
 
-        try:
-            # 修改为使用 run.save_dir 属性
-            lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"lyapunovfunction_checkpoint_episode_{i+1}.pt")
-            dfunction_ckpt_path = os.path.join(run.public.run_dir, f"dfunction_checkpoint_episode_{i+1}.pt")
-            controller_ckpt_path = os.path.join(run.public.run_dir, f"controller_checkpoint_episode_{i+1}.pt")
-            torch.save(d_learning.lyapunovfunction.state_dict(), lyapunov_ckpt_path)
-            logging.info(f"Saved checkpoint to {str(lyapunov_ckpt_path)}")
-            torch.save(d_learning.dfunction.state_dict(), dfunction_ckpt_path)
-            logging.info(f"Saved checkpoint to {str(dfunction_ckpt_path)}")
-            torch.save(d_learning.controller.state_dict(), controller_ckpt_path)
-            logging.info(f"Saved checkpoint to {str(controller_ckpt_path)}")
-
-        except AttributeError:
-            logging.warning(f"LyapunovFunction {d_learning.lyapunovfunction} does not implement `.state_dict()`")
-
         if max_iters > 0 and i >= max_iters - 1:
             break 
 
-    # env.eval()
-    # trajs = env.rollout(
-    #     max_steps=env.max_episode_length,
-    #     policy=wrapped_policy,
-    #     auto_reset=True,
-    #     break_when_any_done=False,
-    #     return_contiguous=False,
-    # )
-    # env.enable_render(not cfg.headless)
-    # env.reset()
+        if save_interval > 0 and i % save_interval == 0:
+            try:
+                # 修改为使用 run.save_dir 属性
+                lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"lyapunovfunction_checkpoint_episode_{i+1}.pt")
+                dfunction_ckpt_path = os.path.join(run.public.run_dir, f"dfunction_checkpoint_episode_{i+1}.pt")
+                controller_ckpt_path = os.path.join(run.public.run_dir, f"controller_checkpoint_episode_{i+1}.pt")
+                # lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"lyapunovfunction_checkpoint_final.pt")
+                # dfunction_ckpt_path = os.path.join(run.public.run_dir, f"dfunction_checkpoint_final.pt")
+                # controller_ckpt_path = os.path.join(run.public.run_dir, f"controller_checkpoint_final.pt")
+                torch.save(d_learning.lyapunovfunction.state_dict(), lyapunov_ckpt_path)
+                logging.info(f"Saved checkpoint to {str(lyapunov_ckpt_path)}")
+                torch.save(d_learning.dfunction.state_dict(), dfunction_ckpt_path)
+                logging.info(f"Saved checkpoint to {str(dfunction_ckpt_path)}")
+                torch.save(d_learning.controller.state_dict(), controller_ckpt_path)
+                logging.info(f"Saved checkpoint to {str(controller_ckpt_path)}")
+
+            except AttributeError:
+                logging.warning(f"LyapunovFunction {d_learning.lyapunovfunction} does not implement `.state_dict()`")
+
+
+    lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"lyapunovfunction_checkpoint_final.pt")
+    dfunction_ckpt_path = os.path.join(run.public.run_dir, f"dfunction_checkpoint_final.pt")
+    controller_ckpt_path = os.path.join(run.public.run_dir, f"controller_checkpoint_final.pt")
+    torch.save(d_learning.lyapunovfunction.state_dict(), lyapunov_ckpt_path)
+    logging.info(f"Saved checkpoint to {str(lyapunov_ckpt_path)}")
+    torch.save(d_learning.dfunction.state_dict(), dfunction_ckpt_path)
+    logging.info(f"Saved checkpoint to {str(dfunction_ckpt_path)}")
+    torch.save(d_learning.controller.state_dict(), controller_ckpt_path)
+    logging.info(f"Saved checkpoint to {str(controller_ckpt_path)}")
+
+    env.eval()
+    trajs = env.rollout(
+        max_steps=env.max_episode_length,
+        policy=wrapped_policy,
+        auto_reset=True,
+        break_when_any_done=False,
+        return_contiguous=False,
+    )
+    env.enable_render(not cfg.headless)
+    env.reset()
     
-    # d_learning.eval_lyapunov(trajs, run)
-
-    # d_learning.train_dfunction(trajs, run)
-
+    d_learning.eval_lyapunov(trajs, run)
 
     wandb.finish()
     simulation_app.close()

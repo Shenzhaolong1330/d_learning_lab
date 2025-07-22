@@ -4,7 +4,7 @@ hydra:
   # see https://hydra.cc/docs/advanced/search_path/
   # - file://../cfg
   - isaac-training/third_party/D_Learning/cfg
-headless: 0 # 是否显示isaac GUI
+headless: 1 # 是否显示isaac GUI
 physics_gpu: 0
 physics_engine: physx5
 
@@ -12,16 +12,18 @@ physics_engine: physx5
 # env: ${task.env} # 同样在Forest.yaml中有env变量
 
 # total_frames: 150_000_000
-total_frames: 300000
+total_frames: 500000000
 max_iters: -1
 eval_interval: -1
-save_interval: -1
+save_interval: 10
 seed: 0
+
+num_minibatches: 1024
 
 viewer:
   resolution: [960, 720]
-  eye: [8, 0., 6.]
-  lookat: [0., 0., 1.]
+  eye: [8, 0., 12.]
+  lookat: [0., 0., 8.]
 
 # oc.select: https://omegaconf.readthedocs.io/en/2.1_branch/custom_resolvers.html#oc-decode
 wandb:
@@ -37,6 +39,7 @@ wandb:
   tags: 
 
 checkpoint_path: null
+checkpoint_episode: null
 
 defaults:
   - task: DlearningHoverEnv
@@ -45,9 +48,9 @@ defaults:
   - _self_
 
 env:
-  num_envs: 128
+  num_envs: 2048
   env_spacing: 0
-  max_episode_length: 256
+  max_episode_length: 64
 
 sim:
   dt: 0.016
