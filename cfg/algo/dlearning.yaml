@@ -19,6 +19,6 @@ controller:
   layer_norm: true
 
 learning:
-  lyapunov_GD_steps: 1
-  dfunction_GD_steps: 1
+  lyapunov_GD_steps: 10
+  dfunction_GD_steps: 10
   controller_GD_steps: 1

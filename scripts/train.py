@@ -96,7 +96,7 @@ def main(cfg):
 
     collector = SyncDataCollector(
         env,
-        policy=wrapped_policy,
+        policy=d_learning,
         frames_per_batch=frames_per_batch,
         total_frames=total_frames,
         device=cfg.sim.device,
@@ -113,9 +113,6 @@ def main(cfg):
         # episode 指的是从环境初始化到环境结束
         # iteration 指的是训练过程中收集一个批次数据并更新策略的完整周期
         # batch 指的是一次更新策略所使用的数据样本数量
-        # print(data)
-        # info = {"env_frames": collector._frames, "rollout_fps": collector._fps}
-        # run.log(info)
 
         data = data.detach().clone()
         episode_stats.add(data.to_tensordict())
@@ -133,18 +130,16 @@ def main(cfg):
             d_learning.train_dfunction(minibatch, run)
             d_learning.policy_improvement(minibatch, run)
 
-        # print(OmegaConf.to_yaml({k: v for k, v in info.items() if isinstance(v, float)}))
         pbar.set_postfix({"rollout_fps": collector._fps, "frames": collector._frames})
 
         if max_iters > 0 and i >= max_iters - 1:
             break 
 
-        if save_interval > 0 and i % save_interval == 0:
+        if save_interval > 0 and (i-1) % save_interval == 0:
             try:
-                # 修改为使用 run.save_dir 属性
-                lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"lyapunovfunction_checkpoint_episode_{i+1}.pt")
-                dfunction_ckpt_path = os.path.join(run.public.run_dir, f"dfunction_checkpoint_episode_{i+1}.pt")
-                controller_ckpt_path = os.path.join(run.public.run_dir, f"controller_checkpoint_episode_{i+1}.pt")
+                lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"lyapunovfunction_checkpoint_episode_{i}.pt")
+                dfunction_ckpt_path = os.path.join(run.public.run_dir, f"dfunction_checkpoint_episode_{i}.pt")
+                controller_ckpt_path = os.path.join(run.public.run_dir, f"controller_checkpoint_episode_{i}.pt")
                 # lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"lyapunovfunction_checkpoint_final.pt")
                 # dfunction_ckpt_path = os.path.join(run.public.run_dir, f"dfunction_checkpoint_final.pt")
                 # controller_ckpt_path = os.path.join(run.public.run_dir, f"controller_checkpoint_final.pt")
@@ -157,7 +152,6 @@ def main(cfg):
 
             except AttributeError:
                 logging.warning(f"LyapunovFunction {d_learning.lyapunovfunction} does not implement `.state_dict()`")
-
 
     lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"lyapunovfunction_checkpoint_final.pt")
     dfunction_ckpt_path = os.path.join(run.public.run_dir, f"dfunction_checkpoint_final.pt")

@@ -117,35 +117,41 @@ class DlearningHoverEnv(IsaacEnv):
         self.init_poses = self.drone.get_world_poses(clone=True)
         self.init_vels = torch.zeros_like(self.drone.get_velocities())
 
-        # self.init_pos_dist = D.Uniform(
-        #     torch.tensor([-0.5, -0.5, 8.5], device=self.device),
-        #     torch.tensor([0.5, 0.5, 7.5], device=self.device)
-        # )
-        # self.init_pos_dist = D.Uniform(
-        #     torch.tensor([-1.5, -1.5, 8.5], device=self.device),
-        #     torch.tensor([1.5, 1.5, 7.5], device=self.device)
-        # )
-        self.init_pos_dist = D.Uniform(
-            torch.tensor([-1.8, -1.8, 6.2], device=self.device),
-            torch.tensor([1.8, 1.8, 9.8], device=self.device)
-        )
-        # self.init_rpy_dist = D.Uniform(
-        #     torch.tensor([-.2, -.2, 0.], device=self.device) * torch.pi,
-        #     torch.tensor([0.2, 0.2, 0.], device=self.device) * torch.pi
-        # )
-        self.init_rpy_dist = D.Uniform(
-            torch.tensor([-.5, -.5, 0.], device=self.device) * torch.pi,
-            torch.tensor([0.5, 0.5, 0.], device=self.device) * torch.pi
-        )
-        # self.init_rpy_dist = D.Uniform(
-        #     torch.tensor([0., 0., 0.], device=self.device) * torch.pi,
-        #     torch.tensor([0., 0., 0.], device=self.device) * torch.pi
-        # )
+        match cfg.task.init_state:
+            case 'fixed_zero':
+                print("init as fixed_zero")
+                self.init_pos_dist = D.Uniform(
+                    torch.tensor([0., 0., 8.0], device=self.device),
+                    torch.tensor([0., 0., 8.0], device=self.device)
+                )
+                self.init_rpy_dist = D.Uniform(
+                    torch.tensor([0., 0., 0.], device=self.device) * torch.pi,
+                    torch.tensor([0., 0., 0.], device=self.device) * torch.pi
+                )
+            case 'random1':
+                print("init as random1")
+                self.init_pos_dist = D.Uniform(
+                    torch.tensor([-1.5, -1.5, 8.5], device=self.device),
+                    torch.tensor([1.5, 1.5, 7.5], device=self.device)
+                )
+                self.init_rpy_dist = D.Uniform(
+                    torch.tensor([-.2, -.2, 0.], device=self.device) * torch.pi,
+                    torch.tensor([0.2, 0.2, 0.], device=self.device) * torch.pi
+                )
+            case 'random2':
+                print("init as random2")
+                self.init_pos_dist = D.Uniform(
+                    torch.tensor([-1.8, -1.8, 6.2], device=self.device),
+                    torch.tensor([1.8, 1.8, 9.8], device=self.device)
+                )
+                self.init_rpy_dist = D.Uniform(
+                    torch.tensor([-.5, -.5, 0.], device=self.device) * torch.pi,
+                    torch.tensor([0.5, 0.5, 0.], device=self.device) * torch.pi
+                )
         self.target_rpy_dist = D.Uniform(
             torch.tensor([0., 0., 0.], device=self.device) * torch.pi,
             torch.tensor([0., 0., 0.], device=self.device) * torch.pi
         )
-
         self.target_pos = torch.tensor([[0.0, 0.0, 8.0]], device=self.device)
         self.target_heading = torch.zeros(self.num_envs, 1, 3, device=self.device)
         self.alpha = 0.8

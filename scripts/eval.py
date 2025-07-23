@@ -59,15 +59,9 @@ def main(cfg):
     print('-----------Create ',cfg.task.name,'------------')
     env = DlearningHoverEnv(cfg = cfg, headless = cfg.headless)
     env.set_seed(cfg.seed)
-
     policy = DLearning(cfg, env.observation_spec, env.action_spec, env.device)
-    
     frames_per_batch = env.num_envs * env.max_episode_length
-    total_frames = cfg.get("total_frames", -1) // frames_per_batch * frames_per_batch
-    max_iters = cfg.get("max_iters", -1)
-    eval_interval = cfg.get("eval_interval", -1)
-    save_interval = cfg.get("save_interval", -1)
-
+    # TODO: 排查一下为什么eval中没有实体的情况, 在train中是有的
     env.eval()
     trajs = env.rollout(
         max_steps=env.max_episode_length,
@@ -76,22 +70,21 @@ def main(cfg):
         break_when_any_done=False,
         return_contiguous=False,
     )
-    
     policy.eval_lyapunov(trajs, run)
+    policy.eval_dfunction(trajs, run)
     print(trajs["agents"]["action"])
+    env.reset()
 
-    # policy1 = LeePositionController(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
-    # wrapped_policy = ControllerWrapper(policy1)
-
-    # trajs = env.rollout(
-    #     max_steps=env.max_episode_length,
-    #     policy=wrapped_policy,
-    #     auto_reset=True,
-    #     break_when_any_done=False,
-    #     return_contiguous=False,
-    # )
-
-    # policy.eval_lyapunov(trajs, run)
+    policy1 = LeePositionController(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
+    wrapped_policy = ControllerWrapper(policy1)
+    trajs = env.rollout(
+        max_steps=env.max_episode_length,
+        policy=wrapped_policy,
+        auto_reset=True,
+        break_when_any_done=False,
+        return_contiguous=False,
+    )
+    policy.eval_lyapunov(trajs, run)
     # print(trajs["agents"]["action"])
 
     env.enable_render(not cfg.headless)
@@ -99,7 +92,6 @@ def main(cfg):
 
     wandb.finish()
     simulation_app.close()
-
 
 if __name__ == "__main__":
     main()

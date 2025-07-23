@@ -99,49 +99,49 @@ class DLearning(TensorDictModuleBase):
         self.observation_spec = observation_spec
         self.action_spec = action_spec
         action_dim = action_spec.shape[-1]
-        fake_observation = observation_spec.zero()
-        fake_action = action_spec.zero()
-        if not isinstance(fake_action, TensorDict):
-            fake_action = TensorDict({"agents": {"action": fake_action}}, batch_size=fake_action.shape[:-1])
-        fake_observation = fake_observation.update(fake_action)
+        self.equilibrium_thrust = 7.0231
+        equilibrium_observation = observation_spec.zero()
+        equilibrium_action = action_spec.zero()
+        equilibrium_action[..., -1] = self.equilibrium_thrust # 悬停推力
+        if not isinstance(equilibrium_action, TensorDict):
+            equilibrium_action = TensorDict({"agents": {"action": equilibrium_action}}, batch_size=equilibrium_action.shape[:-1])
+        equilibrium_observation = equilibrium_observation.update(equilibrium_action)
 
         # init lyapunov function
         self.lyapunovfunction = TensorDictModule(
             LyapunovFunction(self.cfg),
-            # [("agents", "transformed_drone_state")],
-            [("agents", "observation")],
+            [("agents", "transformed_drone_state")],
+            # [("agents", "observation")],
             [("agents", "lyapunov_value")]
         ).to(self.device)
-        self.lyapunovfunction(fake_observation)
+        self.lyapunovfunction(equilibrium_observation)
 
         # init dfunction
         self.dfunction = TensorDictModule(
             DFunction(self.cfg),
-            # [("agents", "transformed_drone_state"), ("agents", "action")],
-            [("agents", "observation"), ("agents", "action")],
+            [("agents", "transformed_drone_state"), ("agents", "action")],
+            # [("agents", "observation"), ("agents", "action")],
             [("agents", "dfunction_value")]
         ).to(self.device)
-        self.dfunction(fake_observation)
+        self.dfunction(equilibrium_observation)
 
         # init controller
         self.controller = TensorDictModule(
             ControllerFunction(self.cfg, action_dim),
-            # [("agents", "transformed_drone_state")],
-            [("agents", "observation")],
+            [("agents", "transformed_drone_state")],
+            # [("agents", "observation")],
             [("agents", "action")]
         ).to(self.device)
-        self.controller(fake_observation)
+        self.controller(equilibrium_observation)
         
         if self.cfg.checkpoint_path is not None:
             # 构建各个子模块的检查点路径
             # lyapunov_ckpt_path = os.path.join(self.cfg.checkpoint_path, "lyapunovfunction_checkpoint_final.pt")
             # dfunction_ckpt_path = os.path.join(self.cfg.checkpoint_path, "dfunction_checkpoint_final.pt")
             # controller_ckpt_path = os.path.join(self.cfg.checkpoint_path, "controller_checkpoint_final.pt")
-
             lyapunov_ckpt_path = os.path.join(self.cfg.checkpoint_path, f"lyapunovfunction_checkpoint_episode_{self.cfg.checkpoint_episode}.pt")
             dfunction_ckpt_path = os.path.join(self.cfg.checkpoint_path, f"dfunction_checkpoint_episode_{self.cfg.checkpoint_episode}.pt")
             controller_ckpt_path = os.path.join(self.cfg.checkpoint_path, f"controller_checkpoint_episode_{self.cfg.checkpoint_episode}.pt")
-
             # 加载 LyapunovFunction 模块的参数
             if os.path.exists(lyapunov_ckpt_path):
                 lyapunov_state_dict = torch.load(lyapunov_ckpt_path)
@@ -149,7 +149,6 @@ class DLearning(TensorDictModuleBase):
                 logging.info(f"Loaded LyapunovFunction checkpoint from {lyapunov_ckpt_path}")
             else:
                 logging.warning(f"LyapunovFunction checkpoint not found at {lyapunov_ckpt_path}")
-
             # 加载 DFunction 模块的参数
             if os.path.exists(dfunction_ckpt_path):
                 dfunction_state_dict = torch.load(dfunction_ckpt_path)
@@ -157,7 +156,6 @@ class DLearning(TensorDictModuleBase):
                 logging.info(f"Loaded DFunction checkpoint from {dfunction_ckpt_path}")
             else:
                 logging.warning(f"DFunction checkpoint not found at {dfunction_ckpt_path}")
-
             # 加载 ControllerFunction 模块的参数
             if os.path.exists(controller_ckpt_path):
                 controller_state_dict = torch.load(controller_ckpt_path)
@@ -166,13 +164,11 @@ class DLearning(TensorDictModuleBase):
                 print('--------------------controller loaded------------------------')
             else:
                 logging.warning(f"ControllerFunction checkpoint not found at {controller_ckpt_path}")
-
         else:
             def mini_init_(module):
                 if isinstance(module, nn.Linear):
                     nn.init.orthogonal_(module.weight, 0.01)
                     nn.init.constant_(module.bias, 0.)
-
             def kaiming_init_(module):
                 if isinstance(module, nn.Linear):
                     # Kaiming 正态分布初始化
@@ -194,18 +190,12 @@ class DLearning(TensorDictModuleBase):
         return tensordict
 
     def train_lyapunov(self, tensordict: TensorDict, run):
-        # print('---------------start training lyapunov----------------')
-        equilibrium_input = self.observation_spec.zero()
-        # print('equilibrium_input: ', equilibrium_input)
-        # print('equilibrium_input.shape: ', equilibrium_input.shape)
-        # equilibrium_input.shape torch.Size([8])
+        equilibrium_observation = self.observation_spec.zero()
+        # TODO: 稳定点的状态和控制量,设置错了,不能为00000
         next_tensordict = tensordict["next"]
-        # loss_values = []
-        # semi_negative_definite_values = []
-        # positive_definite_values = []
         dt = self.cfg.sim.dt
         for i in range(self.cfg.algo.learning.lyapunov_GD_steps):
-            V0 = self.lyapunovfunction(equilibrium_input)[("agents", "lyapunov_value")]
+            V0 = self.lyapunovfunction(equilibrium_observation)[("agents", "lyapunov_value")]
             V = self.lyapunovfunction(tensordict)[("agents", "lyapunov_value")]
             V_ = self.lyapunovfunction(next_tensordict)[("agents", "lyapunov_value")]
             Vdot = (V_ - V) / dt
@@ -229,11 +219,7 @@ class DLearning(TensorDictModuleBase):
             with torch.no_grad(): 
                 self.lya_opt.step()
                 self.lya_opt.zero_grad()
-            # loss_values.append(loss.item())
-            # semi_negative_definite_values.append(SemiNegativeDefinite.item())
-            # positive_definite_values.append(PositiveDefinite.item())
 
-            # 记录当前步骤的信息到 SwanLab
             step_info = {
                 "lyapunov_loss": loss.item(),
                 "lyapunov_semi_negative_definite": SemiNegativeDefinite.item(),
@@ -245,26 +231,15 @@ class DLearning(TensorDictModuleBase):
             if run is not None:
                 run.log(step_info)
 
-        # return {
-        #     "lyapunov_loss": loss_values,
-        #     "lyapunov_semi_negative_definite": semi_negative_definite_values,
-        #     "lyapunov_positive_definite": positive_definite_values,
-        #     "lyapunov_negative_V_ratio":negative_V_ratio,
-        #     "lyapunov_positive_Vdot_ratio":positive_Vdot_ratio,
-        #     "lyapunov_equilibrium_value": EquilibriumValue.item(),
-        # }
-
     def eval_lyapunov(self, tensordict: TensorDict, run):
-        # print('---------------start evaluating lyapunov----------------')
-        equilibrium_input = self.observation_spec.zero()
+        equilibrium_observation = self.observation_spec.zero()
         next_tensordict = tensordict["next"]
 
-        V0 = self.lyapunovfunction(equilibrium_input)[("agents", "lyapunov_value")]
+        V0 = self.lyapunovfunction(equilibrium_observation)[("agents", "lyapunov_value")]
         V = self.lyapunovfunction(tensordict)[("agents", "lyapunov_value")]
         V_ = self.lyapunovfunction(next_tensordict)[("agents", "lyapunov_value")]
         Vdot = (V_ - V) / self.cfg.sim.dt
         # Vdot.shape: torch.Size([8, 256, 1, 1])
-
         V_splits = torch.split(V.squeeze(-1).squeeze(-1), 1, dim=0)
         plt.figure(figsize=(10, 6))
 
@@ -277,12 +252,14 @@ class DLearning(TensorDictModuleBase):
         plt.ylabel("Value")
         plt.grid(True)
         plt.show()
+        # print("equilibrium_observation",equilibrium_observation[("agents", "transformed_drone_state")])
+        # print("equilibrium_observation",equilibrium_observation)
+        # print("V0",V0)
 
         # 计算 V 值为负数的比例
         negative_V_count = torch.sum(V < 0).float()
         total_V_count = torch.numel(V)
         negative_V_ratio = negative_V_count / total_V_count
-
         # 计算 Vdot 为正数的比例
         positive_Vdot_count = torch.sum(Vdot > 0).float()
         total_Vdot_count = torch.numel(Vdot)
@@ -295,7 +272,6 @@ class DLearning(TensorDictModuleBase):
         semi_negative_definite_values = SemiNegativeDefinite.item()
         positive_definite_values = PositiveDefinite.item()
 
-        # 记录当前步骤的信息到 SwanLab
         eval_info = {
             "lyapunov_eval_loss": loss_values,
             "lyapunov_eval_semi_negative_definite": semi_negative_definite_values,
@@ -305,21 +281,14 @@ class DLearning(TensorDictModuleBase):
         }
         run.log(eval_info)
 
-        # return {
-        #     "lyapunov_eval_loss": loss_values,
-        #     "lyapunov_eval_semi_negative_definite": semi_negative_definite_values,
-        #     "lyapunov_eval_positive_definite": positive_definite_values,
-        #     "lyapunov_eval_negative_V_ratio":negative_V_ratio,
-        #     "lyapunov_eval_positive_Vdot_ratio":positive_Vdot_ratio,
-        # }
 
     def train_dfunction(self, tensordict: TensorDict, run):
-        # print('---------------start training dfunction----------------')
-        fake_observation = self.observation_spec.zero()
-        fake_action = self.action_spec.zero()
-        if not isinstance(fake_action, TensorDict):
-            fake_action = TensorDict({"agents": {"action": fake_action}}, batch_size=fake_action.shape[:-1])
-        fake_observation = fake_observation.update(fake_action)
+        equilibrium_observation = self.observation_spec.zero()
+        equilibrium_action = self.action_spec.zero()
+        equilibrium_action[..., -1] = self.equilibrium_thrust
+        if not isinstance(equilibrium_action, TensorDict):
+            equilibrium_action = TensorDict({"agents": {"action": equilibrium_action}}, batch_size=equilibrium_action.shape[:-1])
+        equilibrium_observation = equilibrium_observation.update(equilibrium_action)
 
         dt = self.cfg.sim.dt
         next_tensordict = tensordict["next"]
@@ -330,7 +299,7 @@ class DLearning(TensorDictModuleBase):
         # loss_values = []
         loss_fn = nn.MSELoss()
         for i in range(self.cfg.algo.learning.dfunction_GD_steps):
-            D0 = self.dfunction(fake_observation)[('agents','dfunction_value')]
+            D0 = self.dfunction(equilibrium_observation)[('agents','dfunction_value')]
             D = self.dfunction(tensordict)[('agents','dfunction_value')]
 
             positive_D_count = torch.sum(D > 0).float()
@@ -352,18 +321,14 @@ class DLearning(TensorDictModuleBase):
             if run is not None:
                 run.log(step_info)
 
-        # return {
-        #     "dfunction_loss": loss_values,
-        # }
-
     def eval_dfunction(self, tensordict: TensorDict, run):
-        # print('---------------start evaluating dfunction----------------')
-        fake_observation = self.observation_spec.zero()
-        fake_action = self.action_spec.zero()
-        if not isinstance(fake_action, TensorDict):
-            fake_action = TensorDict({"agents": {"action": fake_action}}, batch_size=fake_action.shape[:-1])
-        fake_observation = fake_observation.update(fake_action)
-        D0 = self.dfunction(fake_observation)[('agents','dfunction_value')]
+        equilibrium_observation = self.observation_spec.zero()
+        equilibrium_action = self.action_spec.zero()
+        equilibrium_action[..., -1] = self.equilibrium_thrust
+        if not isinstance(equilibrium_action, TensorDict):
+            equilibrium_action = TensorDict({"agents": {"action": equilibrium_action}}, batch_size=equilibrium_action.shape[:-1])
+        equilibrium_observation = equilibrium_observation.update(equilibrium_action)
+        D0 = self.dfunction(equilibrium_observation)[('agents','dfunction_value')]
 
         dt = self.cfg.sim.dt
         next_tensordict = tensordict["next"]
@@ -378,44 +343,40 @@ class DLearning(TensorDictModuleBase):
         positive_D_count = torch.sum(D > 0).float()
         total_D_count = torch.numel(D)
         positive_D_ratio = positive_D_count / total_D_count
-
+        # print('equilibrium_action',equilibrium_action)
+        # print('equilibrium_observation',equilibrium_observation)
+        # print('tensordict',tensordict)
+        # print('equilibrium_observation',equilibrium_observation[("agents", "transformed_drone_state")])
+        # print('equilibrium_observation',equilibrium_observation[("agents", "action")])
+        # print('tensordict',tensordict[("agents", "transformed_drone_state")])
+        # print('tensordict',tensordict[("agents", "action")])
         eval_info = {
             "dfunction_eval_fitting_loss":fitting_loss.item(),
             "dfunction_eval_positive_D_ratio":positive_D_ratio,
         }
         run.log(eval_info)
 
-        return {
-            "dfunction_eval_fitting_loss":fitting_loss.item(),
-            "dfunction_eval_positive_D_ratio":positive_D_ratio,
-        }
-
     def policy_improvement(self, tensordict: TensorDict, run):
-        # print('---------------start improving policy----------------')
-        # loss_values = []
+
+        stable_action = tensordict[('agents','action')]
         for i in range(self.cfg.algo.learning.controller_GD_steps): 
-            stable_action = tensordict[('agents','action')]
-            # 置换掉tensordict中的action
             tensordict = self.controller(tensordict)  
             nn_action = tensordict[('agents','action')]
+            if stable_action.shape != nn_action.shape:
+                raise ValueError("控制器输出不一致")
+            
             D = self.dfunction(tensordict)[('agents','dfunction_value')]
-
             positive_penalty = torch.sum(torch.relu(D))
             upper_bound = torch.max(D)
             mean = torch.mean(D)
 
-            if stable_action.shape != nn_action.shape:
-                raise ValueError("控制器输出不一致")
-
             controller_correction = torch.sum((stable_action - nn_action)**2)
-            # print(controller_correction.shape)
 
-            loss = self.dfunction_upper_bound_mean_variance_loss(D) + controller_correction * 0 + self.param_sum_square(self.controller.module)
+            loss = self.dfunction_upper_bound_mean_variance_loss(D) + controller_correction * 1 + self.param_sum_square(self.controller.module) * 0
             loss.backward(retain_graph = True)
             with torch.no_grad(): 
                 self.ctrl_opt.step()
                 self.ctrl_opt.zero_grad()
-            # loss_values.append(loss.item())
 
             positive_D_count = torch.sum(D > 0).float()
             total_D_count = torch.numel(D)
@@ -431,10 +392,6 @@ class DLearning(TensorDictModuleBase):
             }
             if run is not None:
                 run.log(step_info)
-
-        # return {
-        #     "policy_improvement_loss": loss_values,
-        # }
 
     def investigate_state_scale(self, tensordict: TensorDict):
         state = tensordict[("agents", "transformed_drone_state")]
@@ -468,4 +425,4 @@ class DLearning(TensorDictModuleBase):
         mean = torch.mean(dvalue)
         variance = torch.var(dvalue)
         # return upper_bound*100 + lower_bound*0 + mean*30 + variance*0 + positive_penalty*10
-        return upper_bound*1 + lower_bound*1 + mean*1 + variance*1 + positive_penalty*100
+        return upper_bound*0 + lower_bound*0 + mean*0 + variance*0 + positive_penalty*1
