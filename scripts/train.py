@@ -96,7 +96,8 @@ def main(cfg):
 
     collector = SyncDataCollector(
         env,
-        policy=d_learning,
+        # policy=d_learning,
+        policy = wrapped_policy,
         frames_per_batch=frames_per_batch,
         total_frames=total_frames,
         device=cfg.sim.device,

@@ -214,7 +214,7 @@ class DLearning(TensorDictModuleBase):
             PositiveDefinite = torch.sum(F.relu(-V))
             EquilibriumValue = torch.sum(V0**2)
 
-            loss = SemiNegativeDefinite + PositiveDefinite + EquilibriumValue# + self.param_sum_square(self.lyapunovfunction.module) * 0.1
+            loss = SemiNegativeDefinite + PositiveDefinite + EquilibriumValue + self.param_sum_square(self.lyapunovfunction.module) * 0.1
             loss.backward(retain_graph = True)
             with torch.no_grad(): 
                 self.lya_opt.step()
@@ -307,7 +307,7 @@ class DLearning(TensorDictModuleBase):
             positive_D_ratio = positive_D_count / total_D_count
 
             fitting_loss = torch.sum(loss_fn(Vdot,D)) + torch.sum(D0**2)
-            loss = fitting_loss # + self.param_sum_square(self.dfunction.module) * 0.01
+            loss = fitting_loss  + self.param_sum_square(self.dfunction.module) * 0.01
             loss.backward(retain_graph = True)
             with torch.no_grad(): 
                 self.dfun_opt.step()
@@ -425,4 +425,4 @@ class DLearning(TensorDictModuleBase):
         mean = torch.mean(dvalue)
         variance = torch.var(dvalue)
         # return upper_bound*100 + lower_bound*0 + mean*30 + variance*0 + positive_penalty*10
-        return upper_bound*0 + lower_bound*0 + mean*0 + variance*0 + positive_penalty*1
+        return upper_bound*0 + lower_bound*0 + mean*0 + variance*0 + positive_penalty*0

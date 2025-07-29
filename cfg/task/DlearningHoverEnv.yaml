@@ -13,7 +13,7 @@ drone_model: Hummingbird
 force_sensor: false
 time_encoding: false
 
-init_state: random2
+init_state: random1
 
 reward_effort_weight: 0.1
 reward_action_smoothness_weight: 0.0

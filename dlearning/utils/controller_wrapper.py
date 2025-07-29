@@ -43,24 +43,35 @@ class ControllerWrapper(torch.nn.Module):
         self.controller = controller
 
     def forward(self, tensordict: TensorDict) -> TensorDict:
-        # print(f"TensorDict keys before setting action: {tensordict.keys(True, True)}")
         state = tensordict.get(("agents", "observation"))[...,:13]
-        # action = self.controller(root_state = state, target_pos = torch.ones_like(state[..., :3]))
-        action = self.controller(root_state = state)
-
-        # forward(
-        #     self, 
-        #     root_state: torch.Tensor, 
-        #     target_pos: torch.Tensor=None,
-        #     target_vel: torch.Tensor=None,
-        #     target_acc: torch.Tensor=None,
-        #     target_yaw: torch.Tensor=None,
-        #     body_rate: bool=False
-        # ):
-
-        # 更新 TensorDict
+        # 使用yaw控制
+        target_yaw = torch.zeros_like(state[..., 0])
+        action = self.controller(root_state = state, target_yaw = target_yaw)
         tensordict.set(("agents","action"), action)
-        # print(f"TensorDict keys after setting action: {tensordict.keys(True, True)}")
-
         return tensordict
 
+class Se3ControllerWrapper(torch.nn.Module):
+    def __init__(self, controller):
+        super().__init__()
+        self.controller = controller
+
+    def forward(self, tensordict: TensorDict) -> TensorDict:
+        state = tensordict.get(("agents", "observation"))[...,:13]
+        # 使用yaw控制
+        target_yaw = torch.zeros_like(state[..., 0])
+        action = self.controller(root_state = state, target_yaw = target_yaw)
+        tensordict.set(("agents","action"), action)
+        return tensordict
+    
+class HierarchicalControllerWrapper(torch.nn.Module):
+    def __init__(self, controller):
+        super().__init__()
+        self.controller = controller
+
+    def forward(self, tensordict: TensorDict) -> TensorDict:
+        state = tensordict.get(("agents", "observation"))[...,:13]
+        # 使用yaw控制
+        target_yaw = torch.zeros_like(state[..., 0])
+        action = self.controller(root_state = state, target_yaw = target_yaw)
+        tensordict.set(("agents","action"), action)
+        return tensordict

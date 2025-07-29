@@ -1,0 +1,7 @@
+# Lee position controller parameters
+position_gain: [-1.5, -1.5, -1.5]
+# position_gain: [0, 0, 0]
+velocity_gain: [2.2, 2.2, 2.2]
+# velocity_gain: [0, 0, 0]
+attitude_gain: [0.7, 0.7, 0.035]
+angular_rate_gain: [0.1, 0.1, 0.025]

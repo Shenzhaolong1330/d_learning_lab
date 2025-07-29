@@ -4,7 +4,7 @@ hydra:
   # see https://hydra.cc/docs/advanced/search_path/
   # - file://../cfg
   - isaac-training/third_party/D_Learning/cfg
-headless: 0 # 是否显示isaac GUI
+headless: 1 # 是否显示isaac GUI
 physics_gpu: 0
 physics_engine: physx5
 
@@ -18,7 +18,7 @@ eval_interval: -1
 save_interval: 1
 seed: 0
 
-num_minibatches: 256
+num_minibatches: 1024
 
 viewer:
   resolution: [960, 720]
@@ -38,10 +38,10 @@ wandb:
   monitor_gym: True
   tags: 
 
-# checkpoint_path: null
-# checkpoint_episode: null
-checkpoint_path: swanlog/run-20250723_134337-9a2696a9
-checkpoint_episode: 15
+checkpoint_path: null
+checkpoint_episode: null
+# checkpoint_path: swanlog/run-20250723_134337-9a2696a9
+# checkpoint_episode: 3
 
 defaults:
   - task: DlearningHoverEnv
@@ -49,9 +49,9 @@ defaults:
   - _self_
 
 env:
-  num_envs: 32
+  num_envs: 1024
   env_spacing: 0
-  max_episode_length: 128
+  max_episode_length: 1024
 
 sim:
   dt: 0.016

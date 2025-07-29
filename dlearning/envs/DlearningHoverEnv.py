@@ -131,8 +131,8 @@ class DlearningHoverEnv(IsaacEnv):
             case 'random1':
                 print("init as random1")
                 self.init_pos_dist = D.Uniform(
-                    torch.tensor([-1.5, -1.5, 8.5], device=self.device),
-                    torch.tensor([1.5, 1.5, 7.5], device=self.device)
+                    torch.tensor([-2.0, -2.0, 6.0], device=self.device),
+                    torch.tensor([2.0, 2.0, 10.0], device=self.device)
                 )
                 self.init_rpy_dist = D.Uniform(
                     torch.tensor([-.2, -.2, 0.], device=self.device) * torch.pi,
@@ -279,6 +279,11 @@ class DlearningHoverEnv(IsaacEnv):
 
         self.stats[env_ids] = 0.
     
+    def _pre_sim_step(self, tensordict: TensorDictBase):
+        # actions是油门
+        actions = tensordict[("agents", "action")]
+        self.effort = self.drone.apply_action(actions)
+
 
     def compute_parameters(
         self,
@@ -304,32 +309,27 @@ class DlearningHoverEnv(IsaacEnv):
         return mixer
 
     # def _pre_sim_step(self, tensordict: TensorDictBase):
-    #     actions是油门
     #     actions = tensordict[("agents", "action")]
-    #     self.effort = self.drone.apply_action(actions)
+    #     # actions是力和力矩
+    #     uav_params = self.drone.params
+    #     rotor_config = uav_params["rotor_configuration"]
+    #     inertia = uav_params["inertia"]
+    #     I = torch.diag_embed(
+    #         torch.tensor([inertia["xx"], inertia["yy"], inertia["zz"], 1])
+    #     )
+    #     mixer = torch.nn.Parameter(self.compute_parameters(rotor_config, I)).to(self.device)
+    #     # print(mixer.shape)
+    #     # print(actions.shape)
+    #     cmd = (mixer @ actions.squeeze(1).T).T.unsqueeze(1)
+    #     # print(cmd.shape)
 
-    def _pre_sim_step(self, tensordict: TensorDictBase):
-        actions = tensordict[("agents", "action")]
-        # actions是力和力矩
-        uav_params = self.drone.params
-        rotor_config = uav_params["rotor_configuration"]
-        inertia = uav_params["inertia"]
-        I = torch.diag_embed(
-            torch.tensor([inertia["xx"], inertia["yy"], inertia["zz"], 1])
-        )
-        mixer = torch.nn.Parameter(self.compute_parameters(rotor_config, I)).to(self.device)
-        # print(mixer.shape)
-        # print(actions.shape)
-        cmd = (mixer @ actions.squeeze(1).T).T.unsqueeze(1)
-        # print(cmd.shape)
+    #     force_constants = torch.as_tensor(rotor_config["force_constants"])
+    #     max_rot_vel = torch.as_tensor(rotor_config["max_rotation_velocities"])
+    #     max_thrusts = torch.nn.Parameter(max_rot_vel.square() * force_constants).to(self.device)
 
-        force_constants = torch.as_tensor(rotor_config["force_constants"])
-        max_rot_vel = torch.as_tensor(rotor_config["max_rotation_velocities"])
-        max_thrusts = torch.nn.Parameter(max_rot_vel.square() * force_constants).to(self.device)
+    #     cmd = (cmd / max_thrusts) * 2 - 1
 
-        cmd = (cmd / max_thrusts) * 2 - 1
-
-        self.effort = self.drone.apply_action(cmd)
+    #     self.effort = self.drone.apply_action(cmd)
 
     def _compute_state_and_obs(self):
         self.root_state = self.drone.get_state()
