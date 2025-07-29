@@ -72,6 +72,7 @@ class HierarchicalControllerWrapper(torch.nn.Module):
         state = tensordict.get(("agents", "observation"))[...,:13]
         # 使用yaw控制
         target_yaw = torch.zeros_like(state[..., 0])
-        action = self.controller(root_state = state, target_yaw = target_yaw)
+        result = self.controller(root_state = state, target_yaw = target_yaw)
+        action = result["action"]
         tensordict.set(("agents","action"), action)
         return tensordict

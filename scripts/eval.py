@@ -54,20 +54,22 @@ def main(cfg):
     sys.path.insert(0, project_root)
     from dlearning.envs.DlearningHoverEnv import DlearningHoverEnv
     from dlearning.learning.d_learning import DLearning
-    from dlearning.utils.controller_wrapper import ControllerWrapper
+    from dlearning.utils.controller_wrapper import ControllerWrapper, HierarchicalControllerWrapper
     from dlearning.controllers import Se3PositionController,Se3PositionControllerCTBR
-    from dlearning.controllers import RateController as _RateController
 
     print('-----------Create ',cfg.task.name,'------------')
     env = DlearningHoverEnv(cfg = cfg, headless = cfg.headless)
-    
     # DONE: 使用transformer修改env的输入动作空间
-    transforms = [InitTracker()]
-    controller = _RateController(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
-    transform = RateController(controller)
-    transforms.append(transform)
+    action_transform: str = cfg.task.get("action_transform", None)
+    if action_transform is not None:
+        if action_transform == "CTBR":
+            from dlearning.controllers import RateController as _RateController
+            transforms = [InitTracker()]
+            controller = _RateController(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
+            transform = RateController(controller)
+            transforms.append(transform)
+    
     env = TransformedEnv(env, Compose(*transforms)).train()
-
     env.set_seed(cfg.seed)
 
     # policy = DLearning(cfg, env.observation_spec, env.action_spec, env.device)
@@ -87,7 +89,7 @@ def main(cfg):
     # env.reset()
 
     policy1 = Se3PositionControllerCTBR(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
-    wrapped_policy = ControllerWrapper(policy1)
+    wrapped_policy = HierarchicalControllerWrapper(policy1)
     trajs = env.rollout(
         max_steps=env.max_episode_length,
         policy=wrapped_policy,

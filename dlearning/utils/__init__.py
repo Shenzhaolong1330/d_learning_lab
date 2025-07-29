@@ -1,1 +1,1 @@
-from .controller_wrapper import DSLPIDControllerWrapper, ControllerWrapper
+from .controller_wrapper import DSLPIDControllerWrapper, ControllerWrapper, HierarchicalControllerWrapper
