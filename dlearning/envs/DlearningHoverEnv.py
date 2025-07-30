@@ -346,18 +346,18 @@ class DlearningHoverEnv(IsaacEnv):
             obs.append(t.expand(-1, self.time_encoding_dim).unsqueeze(1))
 
         # 自定义的标准化的观测格式
-        quaternion = self.root_state[..., 3:7]
-        euler = quaternion_to_euler(quaternion)
-        linear_velocity = self.root_state[...,7:10]
-        angular_velocity = self.root_state[...,10:13]
-        transformed_drone_state = torch.cat([self.rpos, linear_velocity, euler, angular_velocity], dim=-1)
+        # quaternion = self.root_state[..., 3:7]
+        # euler = quaternion_to_euler(quaternion)
+        # linear_velocity = self.root_state[...,7:10]
+        # angular_velocity = self.root_state[...,10:13]
+        # transformed_drone_state = torch.cat([self.rpos, linear_velocity, euler, angular_velocity], dim=-1)
     
         obs = torch.cat(obs, dim=-1)
 
         return TensorDict({
             "agents": {
                 "observation": obs,
-                "transformed_drone_state": transformed_drone_state,
+                # "transformed_drone_state": transformed_drone_state,
                 "intrinsics": self.drone.intrinsics
             },
             "stats": self.stats.clone(),
