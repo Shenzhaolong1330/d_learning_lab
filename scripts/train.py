@@ -63,11 +63,22 @@ def main(cfg):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, project_root)
     from dlearning.envs.DlearningHoverEnv import DlearningHoverEnv
-    from dlearning.learning.d_learning import DLearning
-    from dlearning.utils.controller_wrapper import ControllerWrapper
+    from dlearning.learning.d_learning import DLearning, HierarchicalDLearning
+    from dlearning.utils.controller_wrapper import ControllerWrapper, HierarchicalControllerWrapper
     
     print('-----------Create ',cfg.task.name,'------------')
     env = DlearningHoverEnv(cfg = cfg, headless = cfg.headless)
+    
+    action_transform: str = cfg.task.get("action_transform", None)
+    if action_transform is not None:
+        if action_transform == "CTBR":
+            from dlearning.controllers import RateController as _RateController
+            transforms = [InitTracker()]
+            controller = _RateController(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
+            transform = RateController(controller)
+            transforms.append(transform)
+    
+    env = TransformedEnv(env, Compose(*transforms)).train()
     env.set_seed(cfg.seed)
 
     policy = LeePositionController(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
@@ -75,12 +86,6 @@ def main(cfg):
 
     d_learning = DLearning(cfg, env.observation_spec, env.action_spec, env.device)
 
-    '''
-    TODO：定义评估指标
-        - 收敛速度
-        - 鲁棒性
-        - 跟踪误差
-    '''
     
     frames_per_batch = env.num_envs * env.max_episode_length
     total_frames = cfg.get("total_frames", -1) // frames_per_batch * frames_per_batch
@@ -118,13 +123,6 @@ def main(cfg):
         data = data.detach().clone()
         episode_stats.add(data.to_tensordict())
         
-        # if len(episode_stats) >= env.num_envs:
-            # 判断 episode_stats 中收集的 episode 是不是大于 env.num_envs
-            # stats = {
-            #     "train/" + (".".join(k) if isinstance(k, tuple) else k): torch.mean(v.float()).item() 
-            #     for k, v in episode_stats.pop().items(True, True)
-            # }
-            # info.update(stats)
         batch = make_batch(data, cfg.num_minibatches)
         for minibatch in batch:
             d_learning.train_lyapunov(minibatch, run)

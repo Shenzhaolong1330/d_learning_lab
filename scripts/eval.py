@@ -97,6 +97,7 @@ def main(cfg):
         break_when_any_done=False,
         return_contiguous=False,
     )
+    print(trajs)
     # policy.eval_lyapunov(trajs, run)
     # policy.eval_dfunction(trajs, run)
     # print(trajs["agents"]["action"])

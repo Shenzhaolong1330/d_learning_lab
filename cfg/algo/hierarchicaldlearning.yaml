@@ -1,0 +1,24 @@
+name: hierarchicaldlearning 
+
+train_every: 64
+
+lyapunov:
+  hidden_units: [128, 64]
+  learning_rate: 0.004
+  layer_norm: true
+  softplus: false # 是否在输出使用softplus函数，确保V(x)为正值
+
+dfunction:
+  hidden_units: [128, 64]
+  learning_rate: 0.001
+  layer_norm: true
+
+controller:
+  hidden_units: [64, 16]
+  learning_rate: 0.005
+  layer_norm: true
+
+learning:
+  lyapunov_GD_steps: 1
+  dfunction_GD_steps: 1
+  controller_GD_steps: 1

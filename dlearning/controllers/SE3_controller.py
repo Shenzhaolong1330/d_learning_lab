@@ -510,29 +510,40 @@ class Se3PositionControllerCTBR(nn.Module):
         target_acc = target_acc.reshape(-1, 3)
         target_yaw = target_yaw.reshape(-1, 1)
 
-        pos_control_input, pos_control_output = self.position_control(root_state, target_pos, target_vel, target_acc, target_yaw)
-        R_des = pos_control_output["R_des"]
+        pos_control_input, pos_control_output, R_des, thrust = self.position_control(root_state, target_pos, target_vel, target_acc, target_yaw)
+        # R_des = pos_control_output["R_des"]
         atti_control_input, atti_control_output = self.attitude_control(root_state, R_des, use_body_rate)
-        for td in [pos_control_input, pos_control_output, atti_control_input, atti_control_output]:
-            for key in td:
-                td[key] = td[key].reshape(*batch_shape, -1)
+        
+        pos_control_input = pos_control_input.reshape(*batch_shape, -1)
+        pos_control_output = pos_control_output.reshape(*batch_shape, -1)
+        atti_control_input = atti_control_input.reshape(*batch_shape, -1)
+        atti_control_output = atti_control_output.reshape(*batch_shape, -1)
+        thrust = thrust.reshape(*batch_shape, -1)
 
-        pos_control_input = TensorDict(pos_control_input, batch_size=batch_shape)
-        pos_control_output = TensorDict(pos_control_output, batch_size=batch_shape)
-        atti_control_input = TensorDict(atti_control_input, batch_size=batch_shape)
-        atti_control_output = TensorDict(atti_control_output, batch_size=batch_shape)
-        thrust = pos_control_output["thrust"]
-        body_rate_des = atti_control_output["body_rate_des"]
+        # for td in [pos_control_input, pos_control_output, atti_control_input, atti_control_output]:
+        #     for key in td:
+        #         td[key] = td[key].reshape(*batch_shape, -1)
+
+        # pos_control_input = TensorDict(pos_control_input, batch_size=batch_shape)
+        # pos_control_output = TensorDict(pos_control_output, batch_size=batch_shape)
+        # atti_control_input = TensorDict(atti_control_input, batch_size=batch_shape)
+        # atti_control_output = TensorDict(atti_control_output, batch_size=batch_shape)
+
+        # thrust = pos_control_output["thrust"]
+        # body_rate_des = atti_control_output["body_rate_des"]
+        body_rate_des = atti_control_output
         CTBR = torch.cat([thrust, body_rate_des], dim=-1)
         CTBR = CTBR.reshape(*batch_shape, -1)
-        result = TensorDict({
-            "action":CTBR,
-            "pos_control_input":pos_control_input,
-            "pos_control_output":pos_control_output,
-            "att_control_input":atti_control_input,
-            "att_control_output":atti_control_output,
-        },batch_size=batch_shape)
-
+        result = TensorDict(
+            {
+                "action": CTBR,
+                "pos_control_input": pos_control_input,
+                "pos_control_output": pos_control_output,
+                "att_control_input": atti_control_input,
+                "att_control_output": atti_control_output,
+            },
+            batch_size=batch_shape
+        )
         return result
 
     def position_control(
@@ -565,21 +576,20 @@ class Se3PositionControllerCTBR(nn.Module):
         ], dim=-1)
         R = quaternion_to_rotation_matrix(rot)
         thrust = -self.mass * (acc * R[:, :, 2]).sum(-1, True)
-        # print('pos_error',pos_error.shape)
-        # print('vel_error',vel_error.shape)
-        # print('acc',acc.shape)
-        # print('R_des',R_des.shape)
-        # print('thrust',thrust.shape)
-        pos_control_input = {
-            "pos_error": pos_error,
-            "vel_error": vel_error,
-        }
-        pos_control_output = {
-            "acc_des": acc,
-            "R_des": R_des,
-            "thrust": thrust,
-        }
-        return pos_control_input, pos_control_output
+        # pos_control_input = {
+        #     "pos_error": pos_error,
+        #     "vel_error": vel_error,
+        #     "attitude": rot,
+        #     "target_yaw": target_yaw
+        # }
+        pos_control_input = torch.cat([pos_error, vel_error], dim=-1)
+        # pos_control_output = {
+        #     "acc_des": acc,
+        #     "R_des": R_des,
+        #     "thrust": thrust,
+        # }
+        pos_control_output = acc
+        return pos_control_input, pos_control_output, R_des, thrust
     
     def attitude_control(
         self, 
@@ -606,15 +616,17 @@ class Se3PositionControllerCTBR(nn.Module):
             - self.attitude_gain * e_R 
             - self.ang_rate_gain * body_rate 
         )
-        atti_control_input = {
-            "R": R,
-            "R_des": R_des,
-            "e_R": e_R,
-            "body_rate": body_rate,
-        }
-        atti_control_output = {
-            "body_rate_des": body_rate_des,
-        }
+        # atti_control_input = {
+        #     "R": R,
+        #     "R_des": R_des,
+        #     "e_R": e_R,
+        #     "body_rate": body_rate,
+        # }
+        atti_control_input = torch.cat([e_R, body_rate], dim=-1)
+        # atti_control_output = {
+        #     "body_rate_des": body_rate_des,
+        # }
+        atti_control_output = body_rate_des
         return atti_control_input, atti_control_output
     
     def rate_control(

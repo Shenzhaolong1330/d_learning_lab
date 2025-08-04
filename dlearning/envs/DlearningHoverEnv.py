@@ -201,13 +201,19 @@ class DlearningHoverEnv(IsaacEnv):
         self.observation_spec = CompositeSpec({
             "agents": CompositeSpec({
                 "observation": UnboundedContinuousTensorSpec((1, observation_dim), device=self.device),
-                "transformed_drone_state": UnboundedContinuousTensorSpec((1, 12), device=self.device),
-                "intrinsics": self.drone.intrinsics_spec.unsqueeze(0).to(self.device)
+                # "transformed_drone_state": UnboundedContinuousTensorSpec((1, 12), device=self.device),
+                "intrinsics": self.drone.intrinsics_spec.unsqueeze(0).to(self.device),
+                # hierarchical control input
+                "pos_control_input": UnboundedContinuousTensorSpec((1, 6), device=self.device),
+                "atti_control_input": UnboundedContinuousTensorSpec((1, 6), device=self.device)
             })
         }).expand(self.num_envs).to(self.device)
         self.action_spec = CompositeSpec({
             "agents": CompositeSpec({
                 "action": self.drone.action_spec.unsqueeze(0),
+                # hierarchical control output
+                "pos_control_output": UnboundedContinuousTensorSpec((1, 3), device=self.device),
+                "atti_control_output": UnboundedContinuousTensorSpec((1, 3), device=self.device)
             })
         }).expand(self.num_envs).to(self.device)
         self.reward_spec = CompositeSpec({
@@ -358,6 +364,7 @@ class DlearningHoverEnv(IsaacEnv):
             "agents": {
                 "observation": obs,
                 # "transformed_drone_state": transformed_drone_state,
+                
                 "intrinsics": self.drone.intrinsics
             },
             "stats": self.stats.clone(),
@@ -365,7 +372,7 @@ class DlearningHoverEnv(IsaacEnv):
         }, self.batch_size)
 
     def _compute_reward_and_done(self):
-        # pose reward
+         # pose reward
         pos_error = torch.norm(self.rpos, dim=-1)
         heading_alignment = torch.sum(self.drone.heading * self.target_heading, dim=-1)
         
@@ -392,24 +399,24 @@ class DlearningHoverEnv(IsaacEnv):
             + reward_action_smoothness
         )
         
-        terminated = (self.drone.pos[..., 2] < 0.2) | (distance > 4)
-        truncated = (self.progress_buf >= self.max_episode_length).unsqueeze(-1)
+        # terminated = (self.drone.pos[..., 2] < 0.2) | (distance > 4)
+        # truncated = (self.progress_buf >= self.max_episode_length).unsqueeze(-1)
 
-        self.stats["pos_error"].lerp_(pos_error, (1-self.alpha))
-        self.stats["heading_alignment"].lerp_(heading_alignment, (1-self.alpha))
-        self.stats["uprightness"].lerp_(self.root_state[..., 18], (1-self.alpha))
-        self.stats["action_smoothness"].lerp_(-self.drone.throttle_difference, (1-self.alpha))
-        self.stats["return"] += reward
-        self.stats["episode_len"][:] = self.progress_buf.unsqueeze(1)
+        # self.stats["pos_error"].lerp_(pos_error, (1-self.alpha))
+        # self.stats["heading_alignment"].lerp_(heading_alignment, (1-self.alpha))
+        # self.stats["uprightness"].lerp_(self.root_state[..., 18], (1-self.alpha))
+        # self.stats["action_smoothness"].lerp_(-self.drone.throttle_difference, (1-self.alpha))
+        # self.stats["return"] += reward
+        # self.stats["episode_len"][:] = self.progress_buf.unsqueeze(1)
 
         return TensorDict(
             {
                 "agents": {
                     "reward": reward.unsqueeze(-1)
                 },
-                "done": terminated | truncated,
-                "terminated": terminated,
-                "truncated": truncated
+                # "done": terminated | truncated,
+                # "terminated": terminated,
+                # "truncated": truncated
             },
             self.batch_size,
         )

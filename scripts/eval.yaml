@@ -1,9 +1,8 @@
 # hydra.job.chdir: false
 hydra:
   searchpath:
-  # see https://hydra.cc/docs/advanced/search_path/
-  # - file://../cfg
   - isaac-training/third_party/D_Learning/cfg
+
 headless: 0 # 是否显示isaac GUI
 physics_gpu: 0
 physics_engine: physx5
@@ -11,7 +10,6 @@ physics_engine: physx5
 # sim: ${task.sim} # 需要输入当前的task名：例如python xxxx task=Forest， 会找到cfg/task/Forest.yaml
 # env: ${task.env} # 同样在Forest.yaml中有env变量
 
-# total_frames: 150_000_000
 total_frames: 20000
 max_iters: -1
 eval_interval: -1
@@ -23,7 +21,6 @@ viewer:
   eye: [8, 0., 12.]
   lookat: [0., 0., 8.]
 
-# oc.select: https://omegaconf.readthedocs.io/en/2.1_branch/custom_resolvers.html#oc-decode
 wandb:
   group: ${oc.select:..task.name}
   run_name: ${oc.select:..task.name,test}-${oc.select:..algo.name,none}
