@@ -13,11 +13,13 @@ drone_model: Hummingbird
 force_sensor: false
 time_encoding: false
 
-init_state: random1
+init_state: random1 # fixed_zero #　random2
+
+train_mode: atti # atti
 
 reward_effort_weight: 0.1
 reward_action_smoothness_weight: 0.0
 reward_motion_smoothness_weight: 0.0
 reward_distance_scale: 1.2
 
-action_transform: CTBR
+action_transform: null

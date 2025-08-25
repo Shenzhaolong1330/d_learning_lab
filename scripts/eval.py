@@ -52,30 +52,38 @@ def main(cfg):
 
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, project_root)
-    from dlearning.envs.DlearningHoverEnv import DlearningHoverEnv
-    from dlearning.learning.d_learning import DLearning
-    from dlearning.utils.controller_wrapper import ControllerWrapper, HierarchicalControllerWrapper
+    from dlearning.envs import DlearningHoverEnv
+    from dlearning.learning import DLearning, HierarchicalDLearning
+    from dlearning.utils import ControllerWrapper, HierarchicalControllerWrapper, tensordict_next_hierarchical_control
     from dlearning.controllers import Se3PositionController,Se3PositionControllerCTBR
 
     print('-----------Create ',cfg.task.name,'------------')
     env = DlearningHoverEnv(cfg = cfg, headless = cfg.headless)
-    # DONE: 使用transformer修改env的输入动作空间
-    action_transform: str = cfg.task.get("action_transform", None)
-    if action_transform is not None:
-        if action_transform == "CTBR":
-            from dlearning.controllers import RateController as _RateController
-            transforms = [InitTracker()]
-            controller = _RateController(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
-            transform = RateController(controller)
-            transforms.append(transform)
     
-    env = TransformedEnv(env, Compose(*transforms)).train()
+    # # DONE: 使用transformer修改env的输入动作空间
+    # action_transform: str = cfg.task.get("action_transform", None)
+    # if action_transform is not None:
+    #     if action_transform == "CTBR":
+    #         from dlearning.controllers import RateController as _RateController
+    #         transforms = [InitTracker()]
+    #         controller = _RateController(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
+    #         transform = RateController(controller)
+    #         transforms.append(transform)
+    
+    # env = TransformedEnv(env, Compose(*transforms)).train()
+    
     env.set_seed(cfg.seed)
 
-    # policy = DLearning(cfg, env.observation_spec, env.action_spec, env.device)
-    # frames_per_batch = env.num_envs * env.max_episode_length
+    policy = HierarchicalDLearning(
+        cfg = cfg, 
+        uav_params = env.drone.params, 
+        observation_spec = env.observation_spec, 
+        action_spec = env.action_spec, 
+        device = env.device
+        )
+    frames_per_batch = env.num_envs * env.max_episode_length
 
-    # env.eval()
+    env.eval()
     # trajs = env.rollout(
     #     max_steps=env.max_episode_length,
     #     policy=policy,
@@ -83,8 +91,7 @@ def main(cfg):
     #     break_when_any_done=False,
     #     return_contiguous=False,
     # )
-    # policy.eval_lyapunov(trajs, run)
-    # policy.eval_dfunction(trajs, run)
+    # policy.eval_pos_lyapunov(trajs)
     # print(trajs["agents"]["action"])
     # env.reset()
 
@@ -97,10 +104,57 @@ def main(cfg):
         break_when_any_done=False,
         return_contiguous=False,
     )
-    print(trajs)
-    # policy.eval_lyapunov(trajs, run)
-    # policy.eval_dfunction(trajs, run)
-    # print(trajs["agents"]["action"])
+
+    # policy.eval_pos_lyapunov(trajs, run)
+    policy.eval_atti_lyapunov(trajs, run)
+    
+    import matplotlib.pyplot as plt
+
+    # 提取数据 [timesteps, 6]
+    data = trajs["agents"]["atti_control_output"][4, :, 0, :].cpu().detach().numpy()
+    data1 = trajs["agents"]["atti_control_input"][4, :, 0, :].cpu().detach().numpy()
+    timesteps = np.arange(data.shape[0])
+    colors = plt.cm.tab20(np.linspace(0, 1, 9))
+    plt.figure(figsize=(12, 6))
+    # plt.plot(timesteps, data1[:, 0], 
+    #         color=colors[1],
+    #         linewidth=1.5,
+    #         label=f'atti error')
+    # plt.plot(timesteps, data1[:, 3], 
+    #         color=colors[2],
+    #         linewidth=1.5,
+    #         label=f'body rate')
+    # plt.plot(timesteps, data[:, 0], 
+    #         color=colors[3],
+    #         linewidth=1.5,
+    #         label=f'control torque')
+    for i in range(6):
+        plt.plot(timesteps, data1[:, i], 
+                color=colors[i],
+                linewidth=1.5,
+                label=f'State {i+1}')
+        
+    # for i in range(3):
+    #     plt.plot(timesteps, data[:, i], 
+    #             color=colors[i+6],
+    #             linewidth=1.5,
+    #             label=f'Control {i+1}')
+
+    # data = trajs["agents"]["atti_control_output"][:, :, 0, 0].cpu().detach().numpy()
+    # colors = plt.cm.tab20(np.linspace(0, 1, data.shape[0]))
+    # print(data.shape)
+    # for i in range(data.shape[0]):
+    #     plt.plot(timesteps, data[i, :], 
+    #             color=colors[i],
+    #             linewidth=1.5,
+    #             label=f'agent {i}')
+    plt.xlabel('Time Step', fontsize=12)
+    plt.ylabel('State Value', fontsize=12)
+    plt.legend(bbox_to_anchor=(1.05, 1), loc='upper left')
+    plt.grid(True, alpha=0.3)
+    plt.tight_layout()
+    plt.savefig("atti_states_combined.png", bbox_inches='tight')
+    plt.show()
 
     env.enable_render(not cfg.headless)
     env.reset()

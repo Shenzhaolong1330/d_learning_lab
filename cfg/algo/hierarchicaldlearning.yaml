@@ -3,22 +3,47 @@ name: hierarchicaldlearning
 train_every: 64
 
 lyapunov:
-  hidden_units: [128, 64]
-  learning_rate: 0.004
-  layer_norm: true
-  softplus: false # 是否在输出使用softplus函数，确保V(x)为正值
+  pos:
+    hidden_units: [256, 256, 128, 128, 64, 64]
+    learning_rate: 0.00001
+    layer_norm: 0
+    softplus: false # 是否在输出使用softplus函数，确保V(x)为正值
+    enforce_positive: 0  # 是否强制正定
+    virtual_plan_units: 16
+  atti:
+    hidden_units: [256, 256, 128, 128, 64, 64]
+    learning_rate: 0.00000001
+    layer_norm: 0
+    softplus: false # 是否在输出使用softplus函数，确保V(x)为正值
+    enforce_positive: 0  # 是否强制正定
+    virtual_plan_units: 16
 
 dfunction:
-  hidden_units: [128, 64]
-  learning_rate: 0.001
-  layer_norm: true
+  pos:
+    hidden_units: [256, 256, 128, 128, 64]
+    learning_rate: 0.0001
+    layer_norm: true
+  atti:
+    hidden_units: [256, 256, 128, 128, 64]
+    learning_rate: 0.0001
+    layer_norm: true
 
 controller:
-  hidden_units: [64, 16]
-  learning_rate: 0.005
-  layer_norm: true
+  pos:
+    hidden_units: [64, 64, 16]
+    learning_rate: 0.0003
+    layer_norm: true
+  atti:
+    hidden_units: [64, 64, 16]
+    learning_rate: 0.0003
+    layer_norm: true
 
 learning:
-  lyapunov_GD_steps: 1
-  dfunction_GD_steps: 1
-  controller_GD_steps: 1
+  pos:
+    lyapunov_GD_steps: 1
+    dfunction_GD_steps: 1
+    controller_GD_steps: 1
+  atti:
+    lyapunov_GD_steps: 1000
+    dfunction_GD_steps: 100
+    controller_GD_steps: 10

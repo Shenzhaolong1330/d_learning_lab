@@ -128,31 +128,47 @@ class DlearningHoverEnv(IsaacEnv):
                     torch.tensor([0., 0., 0.], device=self.device) * torch.pi,
                     torch.tensor([0., 0., 0.], device=self.device) * torch.pi
                 )
+
             case 'random1':
                 print("init as random1")
                 self.init_pos_dist = D.Uniform(
                     torch.tensor([-2.0, -2.0, 6.0], device=self.device),
                     torch.tensor([2.0, 2.0, 10.0], device=self.device)
                 )
-                self.init_rpy_dist = D.Uniform(
-                    torch.tensor([-.2, -.2, 0.], device=self.device) * torch.pi,
-                    torch.tensor([0.2, 0.2, 0.], device=self.device) * torch.pi
-                )
+                if self.cfg.task.train_mode == 'atti':
+                    self.init_rpy_dist = D.Uniform(
+                        torch.tensor([-.2, -.2, 0.], device=self.device) * torch.pi,
+                        torch.tensor([0.2, 0.2, 0.], device=self.device) * torch.pi
+                    )
+                elif self.cfg.task.train_mode == 'pos':
+                    self.init_rpy_dist = D.Uniform(
+                        torch.tensor([0., 0., 0.], device=self.device) * torch.pi,
+                        torch.tensor([0., 0., 0.], device=self.device) * torch.pi
+                    )
+
             case 'random2':
                 print("init as random2")
                 self.init_pos_dist = D.Uniform(
                     torch.tensor([-1.8, -1.8, 6.2], device=self.device),
                     torch.tensor([1.8, 1.8, 9.8], device=self.device)
                 )
-                self.init_rpy_dist = D.Uniform(
-                    torch.tensor([-.5, -.5, 0.], device=self.device) * torch.pi,
-                    torch.tensor([0.5, 0.5, 0.], device=self.device) * torch.pi
-                )
+                if self.cfg.task.train_mode == 'atti':
+                    self.init_rpy_dist = D.Uniform(
+                        torch.tensor([-.5, -.5, 0.], device=self.device) * torch.pi,
+                        torch.tensor([0.5, 0.5, 0.], device=self.device) * torch.pi
+                    )
+                elif self.cfg.task.train_mode == 'pos':
+                    self.init_rpy_dist = D.Uniform(
+                        torch.tensor([0., 0., 0.], device=self.device) * torch.pi,
+                        torch.tensor([0., 0., 0.], device=self.device) * torch.pi
+                    )
+
         self.target_rpy_dist = D.Uniform(
             torch.tensor([0., 0., 0.], device=self.device) * torch.pi,
             torch.tensor([0., 0., 0.], device=self.device) * torch.pi
         )
         self.target_pos = torch.tensor([[0.0, 0.0, 8.0]], device=self.device)
+        self.target_vel = torch.tensor([[0.0, 0.0, 0.0]], device=self.device)
         self.target_heading = torch.zeros(self.num_envs, 1, 3, device=self.device)
         self.alpha = 0.8
 
@@ -264,7 +280,7 @@ class DlearningHoverEnv(IsaacEnv):
         self.drone.set_velocities(self.init_vels[env_ids], env_ids)
 
         if self.has_payload:
-            # TODO@btx0424: workout a better way 
+
             payload_z = self.payload_z_dist.sample(env_ids.shape)
             joint_indices = torch.tensor([self.drone._view._dof_indices["PrismaticJoint"]], device=self.device)
             self.drone._view.set_joint_positions(
@@ -342,11 +358,17 @@ class DlearningHoverEnv(IsaacEnv):
         # torch.Size([64, 1, 23])
         self.info["drone_state"][:] = self.root_state[..., :13] # Position 3, Quaternion 4, Velocity linear+angular 6
         # relative position and heading
-        self.rpos = self.target_pos - self.root_state[..., :3]
-        # # torch.Size([64, 1, 3])
         self.rheading = self.target_heading - self.root_state[..., 13:16]
+        if self.cfg.task.train_mode == 'pos':
+            self.rpos = self.target_pos - self.root_state[..., :3]
+            obs = [self.rpos, self.root_state[..., 3:], self.rheading,]
+        elif self.cfg.task.train_mode == 'atti':
+            self.rpos = self.root_state[..., :3] - self.root_state[..., :3]
+            self.rvel = self.root_state[..., 7:10] - self.root_state[..., 7:10]
+            obs = [self.rpos, self.root_state[..., 3:7], self.rvel, self.root_state[...,10:13], self.rheading,]
         # # torch.Size([64, 1, 3])
-        obs = [self.rpos, self.root_state[..., 3:], self.rheading,]
+        # # torch.Size([64, 1, 3])
+        # obs = [self.rpos, self.root_state[..., 3:7], self.rvel, self.root_state[...,10:13], self.rheading,]
         if self.time_encoding:
             t = (self.progress_buf / self.max_episode_length).unsqueeze(-1)
             obs.append(t.expand(-1, self.time_encoding_dim).unsqueeze(1))

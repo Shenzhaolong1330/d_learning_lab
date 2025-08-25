@@ -28,23 +28,26 @@ wandb:
   entity: rfly
   project: omnidrones
   # mode: ['disabled', 'cloud', 'offline', 'local']
-  mode: cloud
+  mode: disabled
   run_id: 
   monitor_gym: True
   tags: 
 
-checkpoint_path: swanlog/run-20250723_155428-46128165
-checkpoint_episode: 2
+checkpoint_path: swanlog/run-20250825_202244-7ac163ee
+checkpoint_episode: final
 
 defaults:
   - task: DlearningHoverEnv
-  - algo: dlearning
+  - algo: hierarchicaldlearning
   - _self_
 
 env:
-  num_envs: 16
+  num_envs: 8
   env_spacing: 0
-  max_episode_length: 512
+  max_episode_length: 128
+  # pos 400 
+  # atti 64
+
 
 sim:
   dt: 0.016

@@ -475,6 +475,13 @@ class Se3PositionControllerCTBR(nn.Module):
         max_rot_vel = torch.as_tensor(rotor_config["max_rotation_velocities"])
         self.max_thrusts = nn.Parameter(max_rot_vel.square() * force_constants)
 
+        # self.ang_vel_filter_alpha = nn.Parameter(torch.tensor(0.8)) 
+        # self.prev_filtered_body_rate = torch.zeros(3)
+        
+        self.window_size = 10  # 滑动窗口大小
+        self.current_weight = 0.9  # 当前观测权重(0.5表示50%)
+        self.observation_buffer = []
+
     def forward(
         self, 
         root_state: torch.Tensor, 
@@ -511,39 +518,37 @@ class Se3PositionControllerCTBR(nn.Module):
         target_yaw = target_yaw.reshape(-1, 1)
 
         pos_control_input, pos_control_output, R_des, thrust = self.position_control(root_state, target_pos, target_vel, target_acc, target_yaw)
-        # R_des = pos_control_output["R_des"]
-        atti_control_input, atti_control_output = self.attitude_control(root_state, R_des, use_body_rate)
         
+        # 1 CTBR Control
+        # atti_control_input, atti_control_output = self.attitude_control_BR(root_state, R_des, use_body_rate)
+        
+        # 2 Thrust&Torque Control
+        atti_control_input, atti_control_output = self.attitude_control_TK(root_state, R_des, use_body_rate)
+
         pos_control_input = pos_control_input.reshape(*batch_shape, -1)
         pos_control_output = pos_control_output.reshape(*batch_shape, -1)
         atti_control_input = atti_control_input.reshape(*batch_shape, -1)
         atti_control_output = atti_control_output.reshape(*batch_shape, -1)
         thrust = thrust.reshape(*batch_shape, -1)
 
-        # for td in [pos_control_input, pos_control_output, atti_control_input, atti_control_output]:
-        #     for key in td:
-        #         td[key] = td[key].reshape(*batch_shape, -1)
+        # 1 CTBR Control
+        # body_rate_des = atti_control_output
+        # CTBR = torch.cat([thrust, body_rate_des], dim=-1)
+        # CTBR = CTBR.reshape(*batch_shape, -1)
 
-        # pos_control_input = TensorDict(pos_control_input, batch_size=batch_shape)
-        # pos_control_output = TensorDict(pos_control_output, batch_size=batch_shape)
-        # atti_control_input = TensorDict(atti_control_input, batch_size=batch_shape)
-        # atti_control_output = TensorDict(atti_control_output, batch_size=batch_shape)
+        # 2 Thrust&Torque Control
+        cmd = self.thrusttorque2cmd(thrust, atti_control_output)
 
-        # thrust = pos_control_output["thrust"]
-        # body_rate_des = atti_control_output["body_rate_des"]
-        body_rate_des = atti_control_output
-        CTBR = torch.cat([thrust, body_rate_des], dim=-1)
-        CTBR = CTBR.reshape(*batch_shape, -1)
         result = TensorDict(
             {
-                "action": CTBR,
+                "action": cmd,
                 "pos_control_input": pos_control_input,
                 "pos_control_output": pos_control_output,
-                "att_control_input": atti_control_input,
-                "att_control_output": atti_control_output,
+                "atti_control_input": atti_control_input,
+                "atti_control_output": atti_control_output,
             },
             batch_size=batch_shape
-        )
+        ).to(torch.float32)
         return result
 
     def position_control(
@@ -557,6 +562,8 @@ class Se3PositionControllerCTBR(nn.Module):
         pos, rot, vel, ang_vel_w = torch.split(root_state, [3, 4, 3, 3], dim=-1)
         pos_error = pos - target_pos
         vel_error = vel - target_vel
+        # pos_error = pos - pos
+        # vel_error = vel - vel
         acc = (
             pos_error * self.pos_gain 
             + vel_error * self.vel_gain 
@@ -576,22 +583,13 @@ class Se3PositionControllerCTBR(nn.Module):
         ], dim=-1)
         R = quaternion_to_rotation_matrix(rot)
         thrust = -self.mass * (acc * R[:, :, 2]).sum(-1, True)
-        # pos_control_input = {
-        #     "pos_error": pos_error,
-        #     "vel_error": vel_error,
-        #     "attitude": rot,
-        #     "target_yaw": target_yaw
-        # }
+
         pos_control_input = torch.cat([pos_error, vel_error], dim=-1)
-        # pos_control_output = {
-        #     "acc_des": acc,
-        #     "R_des": R_des,
-        #     "thrust": thrust,
-        # }
+
         pos_control_output = acc
         return pos_control_input, pos_control_output, R_des, thrust
     
-    def attitude_control(
+    def attitude_control_BR(
         self, 
         root_state: torch.Tensor,
         R_des: torch.Tensor, 
@@ -616,16 +614,8 @@ class Se3PositionControllerCTBR(nn.Module):
             - self.attitude_gain * e_R 
             - self.ang_rate_gain * body_rate 
         )
-        # atti_control_input = {
-        #     "R": R,
-        #     "R_des": R_des,
-        #     "e_R": e_R,
-        #     "body_rate": body_rate,
-        # }
+
         atti_control_input = torch.cat([e_R, body_rate], dim=-1)
-        # atti_control_output = {
-        #     "body_rate_des": body_rate_des,
-        # }
         atti_control_output = body_rate_des
         return atti_control_input, atti_control_output
     
@@ -635,7 +625,7 @@ class Se3PositionControllerCTBR(nn.Module):
         CTBR: torch.Tensor,
         use_body_rate: bool=False
     ):
-        batch_shape = root_state.shape[:-1]
+        batch_shape = CTBR.shape[:-1]
         root_state = root_state.reshape(-1, 13)
         CTBR = CTBR.reshape(-1, 4)
         target_rate = CTBR[..., 1:]
@@ -647,13 +637,137 @@ class Se3PositionControllerCTBR(nn.Module):
         else:
             body_rate = ang_vel_w
         rate_error = body_rate - target_rate
-        print(f"Rate error: {rate_error[0,:]}")
-        acc_des = (
+        # print(f"Rate error: {rate_error[0,:]}")
+        angacc_des = (
             - rate_error * self.ang_rate_gain
             + ang_vel_w.cross(ang_vel_w)
         )
         target_thrust = target_thrust.unsqueeze(1)
-        angacc_thrust = torch.cat([acc_des, target_thrust], dim=1)
+        angacc_thrust = torch.cat([angacc_des, target_thrust], dim=1)
+        angacc_thrust = angacc_thrust.to(self.mixer.dtype)
+
+        cmd = (self.mixer @ angacc_thrust.T).T
+        cmd = (cmd / self.max_thrusts) * 2 - 1
+        cmd = cmd.reshape(*batch_shape, -1)
+
+        atti_control_output = angacc_des
+
+        return cmd, atti_control_output
+    
+    def weighted_moving_average(self, current_obs):
+        """
+        加权移动平均平滑，当前观测权重较大
+        :param current_obs: 当前观测值
+        :return: 平滑后的观测值
+        """
+        self.observation_buffer.append(current_obs)
+        if len(self.observation_buffer) > self.window_size:
+            self.observation_buffer.pop(0)
+            
+        # 计算权重(当前观测权重较大，历史数据权重递减)
+        weights = [self.current_weight * (0.8 ** i) for i in range(len(self.observation_buffer))]
+        weights[-1] = self.current_weight  # 确保最后一个权重是current_weight
+        weights = [w/sum(weights) for w in weights]  # 归一化
+        
+        smoothed_value = sum(w*v for w,v in zip(weights, self.observation_buffer))
+        return smoothed_value
+
+    def attitude_control_TK(
+        self,
+        root_state: torch.Tensor,
+        R_des: torch.Tensor,
+        use_body_rate: bool=False
+    ):
+        pos, rot, vel, ang_vel_w = torch.split(root_state, [3, 4, 3, 3], dim=-1)
+        R = quaternion_to_rotation_matrix(rot)
+        if not use_body_rate:
+            body_rate = quat_rotate_inverse(rot, ang_vel_w)
+        else:
+            body_rate = ang_vel_w
+
+        # filtered_body_rate = self.ang_vel_filter_alpha * body_rate + (1 - self.ang_vel_filter_alpha) * self.prev_filtered_body_rate
+        # filtered_body_rate = self.ang_vel_filter_alpha * body_rate + (1 - self.ang_vel_filter_alpha) * self.prev_filtered_body_rate.to(body_rate.device)
+        # self.prev_filtered_body_rate = filtered_body_rate.detach() 
+
+        ang_error_matrix = 0.5 * (
+            torch.bmm(R_des.transpose(-2, -1), R) 
+            - torch.bmm(R.transpose(-2, -1), R_des)
+        )
+        e_R = torch.stack([
+            ang_error_matrix[:, 2, 1], 
+            ang_error_matrix[:, 0, 2], 
+            ang_error_matrix[:, 1, 0]
+        ], dim=-1)
+
+        angacc_des = (
+            - self.attitude_gain * e_R 
+            - self.ang_rate_gain * body_rate
+            # - self.ang_rate_gain * self.weighted_moving_average(body_rate)
+            # - self.ang_rate_gain * filtered_body_rate
+            # - 0.3 * self.ang_rate_gain * torch.nn.functional.pad(torch.diff(body_rate, dim=1), (0, 1), mode='constant')
+            + torch.cross(body_rate, body_rate)
+        )
+        '''
+        TODO 姿态控制下，闭环系统的角速度输出有震荡？？
+        - 好像不是调参的问题
+        - 好像也不是环境噪声的问题
+        - 一会输出一下控制器输出看看有没有震荡
+        - 开环输出角速度也有震荡？？？
+        - fixed point呢 1e-6的噪声正常
+        - TODO 考虑使用平滑来进行数据质量改进 没啥用啊
+        '''
+        atti_control_input = torch.cat([e_R, body_rate], dim=-1)
+        atti_control_output = angacc_des
+
+        return atti_control_input, atti_control_output
+   
+    def attitude_control_TK_hierarchical(
+            self,
+            root_state: torch.Tensor,
+            R_des: torch.Tensor,
+            use_body_rate: bool=False
+    ):
+        pos, rot, vel, ang_vel_w = torch.split(root_state, [3, 4, 3, 3], dim=-1)
+        R = quaternion_to_rotation_matrix(rot)
+        if not use_body_rate:
+            body_rate = quat_rotate_inverse(rot, ang_vel_w)
+        else:
+            body_rate = ang_vel_w
+
+        # 外环：姿态控制 - 计算姿态误差并生成期望角速度
+        ang_error_matrix = 0.5 * (
+            torch.bmm(R_des.transpose(-2, -1), R) 
+            - torch.bmm(R.transpose(-2, -1), R_des)
+        )
+        e_R = torch.stack([
+            ang_error_matrix[:, 2, 1], 
+            ang_error_matrix[:, 0, 2], 
+            ang_error_matrix[:, 1, 0]
+        ], dim=-1)
+
+        # 姿态外环生成期望角速度 (比例控制)
+        ang_vel_des = -self.attitude_gain * e_R
+
+        # 内环：角速度控制 - 跟踪期望角速度
+        e_ang_vel = ang_vel_des - body_rate
+        angacc_des = self.ang_rate_gain * e_ang_vel
+
+        # 添加前馈项和交叉项补偿
+        angacc_des += torch.cross(body_rate, body_rate)  # 零向量，可替换为实际前馈
+
+        atti_control_input = torch.cat([e_R, e_ang_vel], dim=-1)
+        atti_control_output = angacc_des
+
+        return atti_control_input, atti_control_output
+
+    def thrusttorque2cmd(
+        self,
+        thrust: torch.Tensor,
+        torque: torch.Tensor,
+    ):
+        batch_shape = thrust.shape[:-1]
+        angacc_thrust = torch.cat([torque, thrust], dim=-1)
+        angacc_thrust = angacc_thrust.reshape(-1, 4)
         angacc_thrust = angacc_thrust.to(self.mixer.dtype)
 
         cmd = (self.mixer @ angacc_thrust.T).T
