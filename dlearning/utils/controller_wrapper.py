@@ -85,3 +85,23 @@ class HierarchicalControllerWrapper(torch.nn.Module):
         #     "att_control_input":atti_control_input,
         #     "att_control_output":atti_control_output,
         # },batch_size=batch_shape)
+
+class DSLPIDControllerWrapper(torch.nn.Module):
+    def __init__(self, controller):
+        super().__init__()
+        self.controller = controller
+        self.controller_state = None
+
+    def forward(self, tensordict: TensorDict) -> TensorDict:
+        state = tensordict.get(("agents", "observation"))[...,:13]
+        batch_shape = state.shape[:-1]
+        device = state.device
+        if self.controller_state is None:
+            self.controller_state = TensorDict({}, batch_size=batch_shape)
+            self.controller_state.set("integral_pos_error", torch.zeros(*batch_shape, 3, device=device))
+            self.controller_state.set("integral_rpy_error", torch.zeros(*batch_shape, 3, device=device))
+            self.controller_state.set("last_rpy", torch.zeros(*batch_shape, 3, device=device))
+        result, self.controller_state = self.controller(state = state, control_target = None, controller_state = self.controller_state)
+        for key in result.keys():
+            tensordict.set(("agents", key), result[key])
+        return tensordict

@@ -1,16 +1,22 @@
 # Lee position controller parameters
-position_gain: [-1.5, -1.5, -1.5]
+position_gain: [1.5, 1.5, 1.5]
 # position_gain: [0, 0, 0]
 velocity_gain: [2.0, 2.0, 2.0]
 # velocity_gain: [0, 0, 0]
 # attitude_gain: [2.0, 2.0, 0.5]
 # angular_rate_gain: [0.5, 0.5, 0.2]
 
+# 姿态控制参数，收敛缓慢
 attitude_gain: [0.3, 0.3, 0.2]
 angular_rate_gain: [0.13, 0.13, 0.2]
 
-# attitude_control_TK_hierarchical
-# attitude_gain: [0.1, 0.1, 0.1]
-# angular_rate_gain: [0.050, 0.050, 0.05]
+# 姿态控制参数，收敛较快
+# attitude_gain: [2.3, 2.3, 2.2]
+# angular_rate_gain: [0.6, 0.6, 0.25]
 
- # TODO 调姿态控制的参
+# attitude_control_TK_hierarchical
+# attitude_gain: [0.02, 0.02, 0.01]
+# angular_rate_gain: [0.060, 0.060, 0.03]
+
+ # DONE 调姿态控制的参
+ # TODO 调位置控制的参

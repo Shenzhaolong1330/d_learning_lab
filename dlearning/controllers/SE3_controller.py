@@ -242,6 +242,7 @@ class Se3PositionController(nn.Module):
         self.attitude_gain = nn.Parameter(
             torch.as_tensor(controller_params["attitude_gain"]).float() @ I[:3, :3].inverse()
         )
+        # print('-----------',self.attitude_gain)
         self.ang_rate_gain = nn.Parameter(
             torch.as_tensor(controller_params["angular_rate_gain"]).float() @ I[:3, :3].inverse()
         )
@@ -479,7 +480,7 @@ class Se3PositionControllerCTBR(nn.Module):
         # self.prev_filtered_body_rate = torch.zeros(3)
         
         self.window_size = 10  # 滑动窗口大小
-        self.current_weight = 0.9  # 当前观测权重(0.5表示50%)
+        self.current_weight = 0.7  # 当前观测权重(0.5表示50%)
         self.observation_buffer = []
 
     def forward(
@@ -560,16 +561,22 @@ class Se3PositionControllerCTBR(nn.Module):
         target_yaw: torch.Tensor
     ):
         pos, rot, vel, ang_vel_w = torch.split(root_state, [3, 4, 3, 3], dim=-1)
-        pos_error = pos - target_pos
-        vel_error = vel - target_vel
+        pos_error = target_pos - pos
+        vel_error = target_vel - vel
         # pos_error = pos - pos
         # vel_error = vel - vel
         acc = (
-            pos_error * self.pos_gain 
-            + vel_error * self.vel_gain 
+            - pos_error * self.pos_gain 
+            - vel_error * self.vel_gain 
             - self.g
         )
-        b3_des = -normalize(acc).to(torch.float32)
+        # print('---------------------------------------------------')   
+        # print('drone position:', pos[0]) 
+        # print('target acc: ', acc[0])
+        # drone position: tensor([0., 0., 0.], device='cuda:0', grad_fn=<SelectBackward0>)
+        # target acc:  tensor([-0.0000, -0.0000, -9.8100], device='cuda:0', dtype=torch.float64,
+        #     grad_fn=<SelectBackward0>)
+        b3_des = - normalize(acc).to(torch.float32)
         b1_des = torch.cat([
             torch.cos(target_yaw), 
             torch.sin(target_yaw), 
@@ -582,6 +589,13 @@ class Se3PositionControllerCTBR(nn.Module):
             b3_des
         ], dim=-1)
         R = quaternion_to_rotation_matrix(rot)
+        # tensor([[[1.0000, 0.0000, 0.0000],
+        # [0.0000, 1.0000, 0.0000],
+        # [0.0000, 0.0000, 1.0000]],
+
+        # [[1.0000, 0.0000, 0.0000],
+        # [0.0000, 1.0000, 0.0000],
+        # [0.0000, 0.0000, 1.0000]]], device='cuda:0')
         thrust = -self.mass * (acc * R[:, :, 2]).sum(-1, True)
 
         pos_control_input = torch.cat([pos_error, vel_error], dim=-1)
@@ -680,6 +694,7 @@ class Se3PositionControllerCTBR(nn.Module):
     ):
         pos, rot, vel, ang_vel_w = torch.split(root_state, [3, 4, 3, 3], dim=-1)
         R = quaternion_to_rotation_matrix(rot)
+        rpy = quaternion_to_euler(rot)
         if not use_body_rate:
             body_rate = quat_rotate_inverse(rot, ang_vel_w)
         else:
@@ -698,7 +713,9 @@ class Se3PositionControllerCTBR(nn.Module):
             ang_error_matrix[:, 0, 2], 
             ang_error_matrix[:, 1, 0]
         ], dim=-1)
-
+        print('---------------------------------------------------')   
+        print('drone euler:', rpy[0])
+        print('rot error:', e_R[0])
         angacc_des = (
             - self.attitude_gain * e_R 
             - self.ang_rate_gain * body_rate
@@ -707,6 +724,8 @@ class Se3PositionControllerCTBR(nn.Module):
             # - 0.3 * self.ang_rate_gain * torch.nn.functional.pad(torch.diff(body_rate, dim=1), (0, 1), mode='constant')
             + torch.cross(body_rate, body_rate)
         )
+        # print(self.attitude_gain)
+        # print(self.ang_rate_gain)
         '''
         TODO 姿态控制下，闭环系统的角速度输出有震荡？？
         - 好像不是调参的问题
@@ -714,7 +733,7 @@ class Se3PositionControllerCTBR(nn.Module):
         - 一会输出一下控制器输出看看有没有震荡
         - 开环输出角速度也有震荡？？？
         - fixed point呢 1e-6的噪声正常
-        - TODO 考虑使用平滑来进行数据质量改进 没啥用啊
+        - 考虑使用平滑来进行数据质量改进 没啥用啊
         '''
         atti_control_input = torch.cat([e_R, body_rate], dim=-1)
         atti_control_output = angacc_des
@@ -744,17 +763,17 @@ class Se3PositionControllerCTBR(nn.Module):
             ang_error_matrix[:, 0, 2], 
             ang_error_matrix[:, 1, 0]
         ], dim=-1)
-
+        # print(f"Attitude error: {e_R[0,:]}")
+        # print(self.attitude_gain)
         # 姿态外环生成期望角速度 (比例控制)
-        ang_vel_des = -self.attitude_gain * e_R
-
+        ang_vel_des = - self.attitude_gain * e_R
+        # print(f"Attitude desired angular velocity: {ang_vel_des[0,:]}")
         # 内环：角速度控制 - 跟踪期望角速度
-        e_ang_vel = ang_vel_des - body_rate
+        # e_ang_vel = ang_vel_des - body_rate
+        e_ang_vel = ang_vel_des - self.weighted_moving_average(body_rate)
+        # print(f"Angular velocity error: {e_ang_vel[0,:]}")
         angacc_des = self.ang_rate_gain * e_ang_vel
-
-        # 添加前馈项和交叉项补偿
-        angacc_des += torch.cross(body_rate, body_rate)  # 零向量，可替换为实际前馈
-
+        # print(f"Attitude angular acceleration: {angacc_des[0,:]}")
         atti_control_input = torch.cat([e_R, e_ang_vel], dim=-1)
         atti_control_output = angacc_des
 
@@ -769,6 +788,14 @@ class Se3PositionControllerCTBR(nn.Module):
         angacc_thrust = torch.cat([torque, thrust], dim=-1)
         angacc_thrust = angacc_thrust.reshape(-1, 4)
         angacc_thrust = angacc_thrust.to(self.mixer.dtype)
+        
+        print(self.mixer)
+        # Parameter containing:
+        # tensor([[ 1.2210e-10, -2.0588e-02,  1.8750e-01,  2.5000e-01],
+        #         [ 2.0588e-02,  7.7785e-10, -1.8750e-01,  2.5000e-01],
+        #         [ 1.2210e-10,  2.0588e-02,  1.8750e-01,  2.5000e-01],
+        #         [-2.0588e-02, -1.0220e-09, -1.8750e-01,  2.5000e-01]], device='cuda:0',
+        #     requires_grad=True)
 
         cmd = (self.mixer @ angacc_thrust.T).T
         cmd = (cmd / self.max_thrusts) * 2 - 1
