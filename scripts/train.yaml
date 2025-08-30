@@ -12,13 +12,13 @@ physics_engine: physx5
 # env: ${task.env} # 同样在Forest.yaml中有env变量
 
 # total_frames: 150_000_000
-total_frames: 400000
+total_frames: 5000000
 max_iters: -1
 eval_interval: -1
-save_interval: 100
-seed: 1
+save_interval: 5
+seed: 2
 
-num_minibatches: 4096
+num_minibatches: 512
 
 viewer:
   resolution: [960, 720]
@@ -38,8 +38,9 @@ wandb:
   monitor_gym: True
   tags: 
 
-checkpoint_path: swanlog/run-20250825_202244-7ac163ee
-checkpoint_episode: final
+# checkpoint_path: swanlog/run-20250826_110601-34db79b4
+checkpoint_path: swanlog/run-20250827_195619-e5dfbd67
+checkpoint_episode: 6
 # checkpoint_path: swanlog/run-20250723_134337-9a2696a9
 # checkpoint_episode: 3
 
@@ -51,12 +52,12 @@ defaults:
 env:
   num_envs: 1024
   env_spacing: 0
-  max_episode_length: 32
+  max_episode_length: 512
   # pos 400 
   # atti 64
 
 sim:
-  dt: 0.008
+  dt: 0.016
   substeps: 1
   gravity: [0, 0, -9.81]
   replicate_physics: false

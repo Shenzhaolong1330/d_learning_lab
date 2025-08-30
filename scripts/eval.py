@@ -54,8 +54,8 @@ def main(cfg):
     sys.path.insert(0, project_root)
     from dlearning.envs import DlearningHoverEnv
     from dlearning.learning import DLearning, HierarchicalDLearning
-    from dlearning.utils import ControllerWrapper, HierarchicalControllerWrapper, tensordict_next_hierarchical_control
-    from dlearning.controllers import Se3PositionController,Se3PositionControllerCTBR
+    from dlearning.utils import ControllerWrapper, HierarchicalControllerWrapper, DSLPIDControllerWrapper, tensordict_next_hierarchical_control
+    from dlearning.controllers import Se3PositionController,Se3PositionControllerCTBR, DSLPIDController
 
     print('-----------Create ',cfg.task.name,'------------')
     env = DlearningHoverEnv(cfg = cfg, headless = cfg.headless)
@@ -73,17 +73,24 @@ def main(cfg):
     # env = TransformedEnv(env, Compose(*transforms)).train()
     
     env.set_seed(cfg.seed)
+    # policy1 = Se3PositionControllerCTBR(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
+    # wrapped_policy = HierarchicalControllerWrapper(policy1)
+    policy1 = DSLPIDController(dt = cfg.sim.dt, g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
+    wrapped_policy = DSLPIDControllerWrapper(policy1)
 
-    policy = HierarchicalDLearning(
-        cfg = cfg, 
-        uav_params = env.drone.params, 
-        observation_spec = env.observation_spec, 
-        action_spec = env.action_spec, 
-        device = env.device
-        )
-    frames_per_batch = env.num_envs * env.max_episode_length
+    # TODO: 去掉模仿学习试试
 
-    env.eval()
+    # policy = HierarchicalDLearning(
+    #     cfg = cfg, 
+    #     uav_params = env.drone.params, 
+    #     observation_spec = env.observation_spec, 
+    #     action_spec = env.action_spec, 
+    #     controller = policy1,
+    #     device = env.device
+    #     )
+    # frames_per_batch = env.num_envs * env.max_episode_length
+
+    # env.eval()
     # trajs = env.rollout(
     #     max_steps=env.max_episode_length,
     #     policy=policy,
@@ -91,12 +98,10 @@ def main(cfg):
     #     break_when_any_done=False,
     #     return_contiguous=False,
     # )
-    # policy.eval_pos_lyapunov(trajs)
-    # print(trajs["agents"]["action"])
-    # env.reset()
+    # policy.eval_pos_lyapunov(trajs,run)
+    # policy.eval_atti_lyapunov(trajs, run)
+    env.reset()
 
-    policy1 = Se3PositionControllerCTBR(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
-    wrapped_policy = HierarchicalControllerWrapper(policy1)
     trajs = env.rollout(
         max_steps=env.max_episode_length,
         policy=wrapped_policy,
@@ -106,13 +111,13 @@ def main(cfg):
     )
 
     # policy.eval_pos_lyapunov(trajs, run)
-    policy.eval_atti_lyapunov(trajs, run)
+    # policy.eval_atti_lyapunov(trajs, run)
     
     import matplotlib.pyplot as plt
 
     # 提取数据 [timesteps, 6]
-    data = trajs["agents"]["atti_control_output"][4, :, 0, :].cpu().detach().numpy()
-    data1 = trajs["agents"]["atti_control_input"][4, :, 0, :].cpu().detach().numpy()
+    data = trajs["agents"]["atti_control_output"][3, :, 0, :].cpu().detach().numpy()
+    data1 = trajs["agents"]["atti_control_input"][3, :, 0, :].cpu().detach().numpy()
     timesteps = np.arange(data.shape[0])
     colors = plt.cm.tab20(np.linspace(0, 1, 9))
     plt.figure(figsize=(12, 6))
@@ -133,7 +138,6 @@ def main(cfg):
                 color=colors[i],
                 linewidth=1.5,
                 label=f'State {i+1}')
-        
     # for i in range(3):
     #     plt.plot(timesteps, data[:, i], 
     #             color=colors[i+6],

@@ -14,7 +14,7 @@ total_frames: 20000
 max_iters: -1
 eval_interval: -1
 save_interval: -1
-seed: 0
+seed: 1
 
 viewer:
   resolution: [960, 720]
@@ -33,8 +33,9 @@ wandb:
   monitor_gym: True
   tags: 
 
-checkpoint_path: swanlog/run-20250825_202244-7ac163ee
-checkpoint_episode: final
+checkpoint_path: swanlog/run-20250827_201028-65d27978
+# swanlog/run-20250826_103947-d4abc3b2
+checkpoint_episode: 6
 
 defaults:
   - task: DlearningHoverEnv
@@ -42,7 +43,7 @@ defaults:
   - _self_
 
 env:
-  num_envs: 8
+  num_envs: 16
   env_spacing: 0
   max_episode_length: 128
   # pos 400 
@@ -50,7 +51,7 @@ env:
 
 
 sim:
-  dt: 0.016
+  dt: 0.032
   substeps: 1
   gravity: [0, 0, -9.81]
   replicate_physics: false

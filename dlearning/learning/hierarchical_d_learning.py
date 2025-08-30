@@ -207,7 +207,7 @@ class DFunction(nn.Module):
         return self.net(cat)
 
 
-class ControllerFunction(nn.Module):
+class NNController(nn.Module):
     def __init__(self, cfg, action_dim):
         super().__init__()
         layers = []
@@ -225,6 +225,34 @@ class ControllerFunction(nn.Module):
         return self.net(state)
 
 
+class GRUController(nn.Module):
+    '''
+    门控循环单元控制器
+        输入： 
+            (batch_size, seq_len, state_dim)
+        输出​​：
+            output 所有时间步的隐藏状态(batch_size, seq_len, hidden_size)
+            h_n 最终隐藏状态 (num_layers * num_directions, batch_size, hidden_size)
+        全链接层：
+            最后时间步的隐藏状态 hidden_size
+            动作 action_dim
+        
+    '''
+    def __init__(self, cfg, state_dim, action_dim):
+        super().__init__()
+        self.gru = nn.GRU(
+                        input_size=state_dim, 
+                        hidden_size=cfg.gru.hidden_size,
+                        num_layers=cfg.gru.num_layers,
+                        batch_first=True      # 输入/输出为 (batch, seq, feature)
+                        )
+        self.fc = nn.Linear(cfg.gru.hidden_size, action_dim)
+
+    def forward(self, state: torch.Tensor):
+        output, hidden = self.gru(state)
+        return self.fc(output[:, -1, :])
+
+
 class HierarchicalDLearning(TensorDictModuleBase):
     def __init__(
         self, 
@@ -232,6 +260,7 @@ class HierarchicalDLearning(TensorDictModuleBase):
         uav_params,
         observation_spec: CompositeSpec, 
         action_spec: CompositeSpec, 
+        controller,
         device
     ):
         super().__init__()
@@ -244,8 +273,8 @@ class HierarchicalDLearning(TensorDictModuleBase):
         atti_action_dim = 3
         self.equilibrium_thrust = 7.0231
         self.mass = torch.tensor(uav_params["mass"])
+        self.controller = controller
         # 初始化神经网络
-
         # 构造完整的虚拟输入 TensorDict
         dummy_input = TensorDict({
             "agents": {
@@ -272,7 +301,7 @@ class HierarchicalDLearning(TensorDictModuleBase):
         ).to(self.device)
         self.pos_dfunction(dummy_input)
         self.pos_controller = TensorDictModule(
-            ControllerFunction(self.cfg.algo.controller.pos, pos_action_dim),
+            NNController(self.cfg.algo.controller.pos, pos_action_dim),
             [("agents", "pos_control_input")],
             [("agents", "pos_control_output")]
         ).to(self.device)
@@ -293,7 +322,7 @@ class HierarchicalDLearning(TensorDictModuleBase):
         ).to(self.device)
         self.atti_dfunction(dummy_input)
         self.atti_controller = TensorDictModule(
-            ControllerFunction(self.cfg.algo.controller.atti, atti_action_dim),
+            NNController(self.cfg.algo.controller.atti, atti_action_dim),
             [("agents", "atti_control_input")],
             [("agents", "atti_control_output")]
         ).to(self.device)
@@ -387,6 +416,7 @@ class HierarchicalDLearning(TensorDictModuleBase):
         self.atti_dfun_opt = torch.optim.Adam(self.atti_dfunction.parameters(), lr=cfg.algo.dfunction.atti.learning_rate)
         self.atti_ctrl_opt = torch.optim.Adam(self.atti_controller.parameters(), lr=cfg.algo.controller.atti.learning_rate)
 
+
     def __call__(self, tensordict: TensorDict):
         # get state
         root_state = tensordict.get(("agents", "observation"))[...,:13]
@@ -408,8 +438,6 @@ class HierarchicalDLearning(TensorDictModuleBase):
             torch.sin(target_yaw), 
             torch.zeros_like(target_yaw)
         ], dim=-1).to(torch.float32)
-        # print(b3_des.shape)
-        # print(b1_des.shape)
         b2_des = normalize(torch.cross(b3_des, b1_des, 1))
         R_des = torch.stack([
             b2_des.cross(b3_des, 1), 
@@ -432,10 +460,13 @@ class HierarchicalDLearning(TensorDictModuleBase):
         atti_control_input = torch.cat([e_R, ang_vel_b], dim=-1)
         tensordict.set(("agents","atti_control_input"), atti_control_input.reshape(*batch_shape, -1))
         self.atti_controller(tensordict)
-        body_rate_des = tensordict[("agents", "atti_control_output")].reshape(-1, 3)
-        CTBR = torch.cat([thrust, body_rate_des], dim=-1)
-        CTBR = CTBR.reshape(*batch_shape, -1)
-        tensordict.set(("agents","action"), CTBR)
+        torque = tensordict[("agents", "atti_control_output")].reshape(-1, 3)
+        thrust = thrust.reshape(*batch_shape, -1)
+        torque = torque.reshape(*batch_shape, -1)
+        cmd = self.controller.thrusttorque2cmd(thrust, torque)
+        # CTBR = torch.cat([thrust, torque], dim=-1)
+        # CTBR = CTBR.reshape(*batch_shape, -1)
+        tensordict.set(("agents","action"), cmd)
         return tensordict
     
     # TODO: hierarchical d learning training
@@ -508,7 +539,7 @@ class HierarchicalDLearning(TensorDictModuleBase):
             # total_Vdot_count = torch.numel(Vdot)
             # positive_Vdot_ratio = positive_Vdot_count / total_Vdot_count
 
-            SemiNegativeDefinite = torch.sum(F.relu(Vdot+0.01))
+            SemiNegativeDefinite = torch.sum(F.relu(Vdot))
             PositiveDefinite = torch.sum(F.relu(-V))
             EquilibriumValue = torch.sum(V0**2)
 
@@ -572,6 +603,46 @@ class HierarchicalDLearning(TensorDictModuleBase):
                 run.log(step_info)
 
 
+    def train_atti_dfunction(self, tensordict: TensorDict, run):
+        equilibrium_observation = TensorDict({}, batch_size=tensordict.shape[:-1])
+        equilibrium_observation.set(("agents","atti_control_input"),torch.zeros_like(tensordict[("agents","atti_control_input")]))
+        equilibrium_action = torch.zeros_like(tensordict[("agents","atti_control_output")])
+        equilibrium_action = TensorDict({"agents": {"atti_control_output": equilibrium_action}}, batch_size=equilibrium_action.shape[:-1])
+        equilibrium_observation = equilibrium_observation.update(equilibrium_action)
+        # print(equilibrium_observation)
+        
+        dt = self.cfg.sim.dt
+        next_tensordict = tensordict["next"]
+        V = self.atti_lyapunov(tensordict)[("agents", "atti_lyapunov_value")]
+        V_ = self.atti_lyapunov(next_tensordict)[("agents", "atti_lyapunov_value")]
+        Vdot = (V_ - V) / dt
+
+        # loss_values = []
+        loss_fn = nn.MSELoss()
+        for i in range(self.cfg.algo.learning.atti.dfunction_GD_steps):
+            D0 = self.atti_dfunction(equilibrium_observation)[('agents','atti_dfunction_value')]
+            D = self.atti_dfunction(tensordict)[('agents','atti_dfunction_value')]
+
+            # positive_D_count = torch.sum(D > 0).float()
+            # total_D_count = torch.numel(D)
+            # positive_D_ratio = positive_D_count / total_D_count
+
+            fitting_loss = torch.sum(loss_fn(Vdot,D)) + torch.sum(D0**2)
+            loss = fitting_loss  + self.param_sum_square(self.atti_dfunction.module) * 0.01
+            loss.backward(retain_graph = True)
+            with torch.no_grad(): 
+                self.atti_dfun_opt.step()
+                self.atti_dfun_opt.zero_grad()
+            # loss_values.append(loss.item())
+            step_info = {
+                "atti_dfunction_loss": loss.item(),
+                "atti_dfunction_fitting_loss":fitting_loss.item(),
+                # "dfunction_positive_D_ratio":positive_D_ratio,
+            }
+            if run is not None:
+                run.log(step_info)
+
+
     def pos_policy_improvement(self, tensordict: TensorDict, run):
 
         stable_action = tensordict[('agents','pos_control_output')]
@@ -588,7 +659,7 @@ class HierarchicalDLearning(TensorDictModuleBase):
 
             controller_correction = torch.sum((stable_action - nn_action)**2)
 
-            loss = self.dfunction_upper_bound_mean_variance_loss(D) + controller_correction * 1 + self.param_sum_square(self.pos_controller.module) * 0.1
+            loss = self.dfunction_upper_bound_mean_variance_loss(D)*0.0 + controller_correction * 0.1 + self.param_sum_square(self.pos_controller.module) * 0.01
             loss.backward(retain_graph = True)
             with torch.no_grad(): 
                 self.pos_ctrl_opt.step()
@@ -610,12 +681,52 @@ class HierarchicalDLearning(TensorDictModuleBase):
                 run.log(step_info)
 
     
+    def atti_policy_improvement(self, tensordict: TensorDict, run):
+
+        stable_action = tensordict[('agents','atti_control_output')]
+        for i in range(self.cfg.algo.learning.atti.controller_GD_steps): 
+            tensordict = self.atti_controller(tensordict)  
+            nn_action = tensordict[('agents','atti_control_output')]
+            if stable_action.shape != nn_action.shape:
+                raise ValueError("控制器输出不一致")
+            
+            D = self.atti_dfunction(tensordict)[('agents','atti_dfunction_value')]
+            # print('D函数值的形状',D.shape)
+            positive_penalty = torch.sum(torch.relu(D))
+            upper_bound = torch.max(D)
+            mean = torch.mean(D)
+
+            controller_correction = torch.sum((stable_action - nn_action)**2)
+
+            loss = self.dfunction_upper_bound_mean_variance_loss(D)*0.0 + controller_correction * 10 + self.param_sum_square(self.pos_controller.module) * 0.001
+            loss.backward(retain_graph = True)
+            with torch.no_grad(): 
+                self.atti_ctrl_opt.step()
+                self.atti_ctrl_opt.zero_grad()
+
+            # positive_D_count = torch.sum(D > 0).float()
+            # total_D_count = torch.numel(D)
+            # positive_D_ratio = positive_D_count / total_D_count
+
+            step_info = {
+                "atti_policy_loss": loss.item(),
+                # "pos_policy_positive_D_ratio":positive_D_ratio,
+                "atti_policy_positive_penalty":positive_penalty,
+                "atti_policy_upper_bound":upper_bound,
+                "atti_policy_mean":mean,
+                "atti_policy_correction":controller_correction,
+            }
+            if run is not None:
+                run.log(step_info)
+
+
     def eval_pos_lyapunov(self, tensordict: TensorDict,run):
         V = self.pos_lyapunov(tensordict)[("agents", "pos_lyapunov_value")]
         # Vdot.shape: torch.Size([8, 256, 1, 1])
         V_splits = torch.split(V.squeeze(-1).squeeze(-1), 1, dim=0)
         plt.figure(figsize=(10, 6))
 
+        # for i in range(V.shape[0]%10):
         for i in range(V.shape[0]):
             V_i = V_splits[i].squeeze(0).cpu().detach().numpy()
             plt.plot(V_i, label=f"V[{i}]")
@@ -640,6 +751,7 @@ class HierarchicalDLearning(TensorDictModuleBase):
         plt.figure(figsize=(10, 6))
 
         for i in range(V.shape[0]):
+        # for i in range(V.shape[0]%10):
             V_i = V_splits[i].squeeze(0).cpu().detach().numpy()
             plt.plot(V_i, label=f"V[{i}]")
         plt.legend()
@@ -693,14 +805,20 @@ class HierarchicalDLearning(TensorDictModuleBase):
     def param_sum_square(self, net: nn.Module):
         param_squares = [p ** 2 for p in net.parameters()]
         return  sum(torch.sum(p) for p in param_squares)
-        
+
+
     def dfunction_upper_bound_mean_variance_loss(self, dvalue):
         """
         """
+        # 确保控制量使dvalue小于
         positive_penalty = torch.sum(torch.relu(dvalue))
-        upper_bound = torch.max(dvalue)
+        # 确保dvalue上届(平衡点附近)是0
+        upper_bound = torch.max(dvalue)**2
+        # dvalue下界
         lower_bound = torch.min(dvalue)
+        # 确保dvalue均值小于0
         mean = torch.mean(dvalue)
+        # 减小dvalue方差
         variance = torch.var(dvalue)
         # return upper_bound*100 + lower_bound*0 + mean*30 + variance*0 + positive_penalty*10
-        return upper_bound*0.1 + lower_bound*0 + mean*0.1 + variance*0 + positive_penalty*1
+        return upper_bound*0.01 + lower_bound*0 + mean*0.01 + variance*0 + positive_penalty*1

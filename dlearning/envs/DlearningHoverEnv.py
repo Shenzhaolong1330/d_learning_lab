@@ -121,25 +121,39 @@ class DlearningHoverEnv(IsaacEnv):
             case 'fixed_zero':
                 print("init as fixed_zero")
                 self.init_pos_dist = D.Uniform(
-                    torch.tensor([0., 0., 8.0], device=self.device),
-                    torch.tensor([0., 0., 8.0], device=self.device)
+                    torch.tensor([0., 0., 8.3], device=self.device),
+                    torch.tensor([0., 0., 8.3], device=self.device)
                 )
                 self.init_rpy_dist = D.Uniform(
                     torch.tensor([0., 0., 0.], device=self.device) * torch.pi,
                     torch.tensor([0., 0., 0.], device=self.device) * torch.pi
                 )
+                # self.init_rpy_dist = D.Uniform(
+                #     torch.tensor([0.0, 0.0, 0.01], device=self.device) * torch.pi,
+                #     torch.tensor([0.0, 0.0, 0.01], device=self.device) * torch.pi
+                # )
 
             case 'random1':
                 print("init as random1")
+                # hummingbird
+                # self.init_pos_dist = D.Uniform(
+                #     torch.tensor([-2.0, -2.0, 6.0], device=self.device),
+                #     torch.tensor([2.0, 2.0, 10.0], device=self.device)
+                # )
+                # crazyflie
                 self.init_pos_dist = D.Uniform(
-                    torch.tensor([-2.0, -2.0, 6.0], device=self.device),
-                    torch.tensor([2.0, 2.0, 10.0], device=self.device)
+                    torch.tensor([-1.0, -1.0, 7.0], device=self.device),
+                    torch.tensor([1.0, 1.0, 9.0], device=self.device)
                 )
                 if self.cfg.task.train_mode == 'atti':
                     self.init_rpy_dist = D.Uniform(
                         torch.tensor([-.2, -.2, 0.], device=self.device) * torch.pi,
                         torch.tensor([0.2, 0.2, 0.], device=self.device) * torch.pi
                     )
+                    # self.init_rpy_dist = D.Uniform(
+                    # torch.tensor([0.1, 0., 0.], device=self.device) * torch.pi,
+                    # torch.tensor([0.1, 0., 0.], device=self.device) * torch.pi
+                    # )
                 elif self.cfg.task.train_mode == 'pos':
                     self.init_rpy_dist = D.Uniform(
                         torch.tensor([0., 0., 0.], device=self.device) * torch.pi,
@@ -149,8 +163,8 @@ class DlearningHoverEnv(IsaacEnv):
             case 'random2':
                 print("init as random2")
                 self.init_pos_dist = D.Uniform(
-                    torch.tensor([-1.8, -1.8, 6.2], device=self.device),
-                    torch.tensor([1.8, 1.8, 9.8], device=self.device)
+                    torch.tensor([-2.8, -2.8, 5.2], device=self.device),
+                    torch.tensor([2.8, 2.8, 10.8], device=self.device)
                 )
                 if self.cfg.task.train_mode == 'atti':
                     self.init_rpy_dist = D.Uniform(
@@ -167,8 +181,8 @@ class DlearningHoverEnv(IsaacEnv):
             torch.tensor([0., 0., 0.], device=self.device) * torch.pi,
             torch.tensor([0., 0., 0.], device=self.device) * torch.pi
         )
-        self.target_pos = torch.tensor([[0.0, 0.0, 8.0]], device=self.device)
-        self.target_vel = torch.tensor([[0.0, 0.0, 0.0]], device=self.device)
+        self.bias_pos = torch.tensor([[0.0, 0.0, 8.0]], device=self.device)
+        # self.target_vel = torch.tensor([[0.0, 0.0, 0.0]], device=self.device)
         self.target_heading = torch.zeros(self.num_envs, 1, 3, device=self.device)
         self.alpha = 0.8
 
@@ -360,7 +374,7 @@ class DlearningHoverEnv(IsaacEnv):
         # relative position and heading
         self.rheading = self.target_heading - self.root_state[..., 13:16]
         if self.cfg.task.train_mode == 'pos':
-            self.rpos = self.target_pos - self.root_state[..., :3]
+            self.rpos =  self.root_state[..., :3] - self.bias_pos
             obs = [self.rpos, self.root_state[..., 3:], self.rheading,]
         elif self.cfg.task.train_mode == 'atti':
             self.rpos = self.root_state[..., :3] - self.root_state[..., :3]
