@@ -33,9 +33,9 @@ wandb:
   monitor_gym: True
   tags: 
 
-checkpoint_path: swanlog/run-20250827_201028-65d27978
+checkpoint_path: swanlog/run-20250831_142414-5b56e8cb
 # swanlog/run-20250826_103947-d4abc3b2
-checkpoint_episode: 6
+checkpoint_episode: final
 
 defaults:
   - task: DlearningHoverEnv

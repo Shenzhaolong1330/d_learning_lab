@@ -12,13 +12,13 @@ physics_engine: physx5
 # env: ${task.env} # 同样在Forest.yaml中有env变量
 
 # total_frames: 150_000_000
-total_frames: 5000000
+total_frames: 1000000
 max_iters: -1
 eval_interval: -1
 save_interval: 5
 seed: 2
 
-num_minibatches: 512
+num_minibatches: 256
 
 viewer:
   resolution: [960, 720]
@@ -50,7 +50,7 @@ defaults:
   - _self_
 
 env:
-  num_envs: 1024
+  num_envs: 2048
   env_spacing: 0
   max_episode_length: 256
   # pos 400 

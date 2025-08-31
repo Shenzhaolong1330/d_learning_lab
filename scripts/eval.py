@@ -74,11 +74,11 @@ def main(cfg):
     
     env.set_seed(cfg.seed)
 
-    policy1 = Se3PositionControllerCTBR(
-        g = np.linalg.norm(cfg.sim.gravity), 
-        uav_params = env.drone.params
-        ).to(env.device)
-    wrapped_policy = HierarchicalControllerWrapper(policy1)
+    # policy1 = Se3PositionControllerCTBR(
+    #     g = np.linalg.norm(cfg.sim.gravity), 
+    #     uav_params = env.drone.params
+    #     ).to(env.device)
+    # wrapped_policy = HierarchicalControllerWrapper(policy1)
     
     policy1 = DSLPIDController(
         dt = cfg.sim.dt, 
@@ -89,14 +89,14 @@ def main(cfg):
 
     # TODO: 去掉模仿学习试试
 
-    # policy = HierarchicalDLearning(
-    #     cfg = cfg, 
-    #     uav_params = env.drone.params, 
-    #     observation_spec = env.observation_spec, 
-    #     action_spec = env.action_spec, 
-    #     controller = policy1,
-    #     device = env.device
-    #     )
+    policy = HierarchicalDLearning(
+        cfg = cfg, 
+        uav_params = env.drone.params, 
+        observation_spec = env.observation_spec, 
+        action_spec = env.action_spec, 
+        controller = policy1,
+        device = env.device
+        )
     # frames_per_batch = env.num_envs * env.max_episode_length
 
     # env.eval()
@@ -120,7 +120,7 @@ def main(cfg):
     )
 
     # policy.eval_pos_lyapunov(trajs, run)
-    # policy.eval_atti_lyapunov(trajs, run)
+    policy.eval_atti_lyapunov(trajs, run)
     
     import matplotlib.pyplot as plt
 

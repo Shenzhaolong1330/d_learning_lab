@@ -74,11 +74,11 @@ def main(cfg):
     
     env.set_seed(cfg.seed)
 
-    policy = Se3PositionControllerCTBR(
-        g = np.linalg.norm(cfg.sim.gravity), 
-        uav_params = env.drone.params
-        ).to(env.device)
-    wrapped_policy = HierarchicalControllerWrapper(policy)
+    # policy = Se3PositionControllerCTBR(
+    #     g = np.linalg.norm(cfg.sim.gravity), 
+    #     uav_params = env.drone.params
+    #     ).to(env.device)
+    # wrapped_policy = HierarchicalControllerWrapper(policy)
 
     policy = DSLPIDController(
         dt = cfg.sim.dt, 
@@ -131,9 +131,7 @@ def main(cfg):
         # d_learning.train_pos_dfunction(data, run)
         # d_learning.pos_policy_improvement(data, run)
         # d_learning.train_atti_lyapunov(data, run)
-        # print('data形状',data.shape)
         batch = make_batch(data, cfg.num_minibatches)
-        # for minibatch in batch:
         for minibatch in tqdm(batch, desc="Processing minibatches"):
             # d_learning.train_pos_lyapunov(minibatch, run)
             # d_learning.train_pos_dfunction(minibatch, run)
@@ -179,7 +177,7 @@ def main(cfg):
 
     env.eval()
     trajs = env.rollout(
-        max_steps=512,
+        max_steps=256,
         policy=wrapped_policy,
         auto_reset=True,
         break_when_any_done=False,

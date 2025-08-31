@@ -184,8 +184,12 @@ class NeuralBacksteppingLyapunovFunction(nn.Module):
 
         if self.softplus is not None:
             nn_term = self.softplus(nn_term)
-        # return self.alpha * base + self.beta * nn_term
-        return nn_term
+
+        return self.alpha * base + self.beta * nn_term
+        '''
+        base这个部分真的很有用，因为它可以提供一个基准值，用于热启动，甚至可以直接影响训练结果，建议加上
+        '''
+        # return nn_term
 
 
 class DFunction(nn.Module):
@@ -543,7 +547,7 @@ class HierarchicalDLearning(TensorDictModuleBase):
             PositiveDefinite = torch.sum(F.relu(-V))
             EquilibriumValue = torch.sum(V0**2)
 
-            loss = SemiNegativeDefinite*100 + PositiveDefinite*10 + EquilibriumValue + self.param_sum_square(self.atti_lyapunov.module) * 0.01
+            loss = SemiNegativeDefinite*10 + PositiveDefinite*10 + EquilibriumValue + self.param_sum_square(self.atti_lyapunov.module) * 0.01
             loss.backward(retain_graph = True)
             with torch.no_grad(): 
                 self.atti_lya_opt.step()
@@ -567,6 +571,7 @@ class HierarchicalDLearning(TensorDictModuleBase):
         # equilibrium_action include acc_des
         equilibrium_action = torch.zeros_like(tensordict[("agents","pos_control_output")])
         equilibrium_action[..., -1] = self.cfg.sim.gravity[2]
+        # TODO 针对不同的模型更换不同的equilibrium_action
         equilibrium_action = TensorDict({"agents": {"pos_control_output": equilibrium_action}}, batch_size=equilibrium_action.shape[:-1])
         equilibrium_observation = equilibrium_observation.update(equilibrium_action)
         # print(equilibrium_observation)
