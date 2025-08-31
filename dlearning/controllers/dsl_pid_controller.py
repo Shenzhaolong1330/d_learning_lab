@@ -30,7 +30,7 @@ class DSLPIDController(nn.Module):
         '''
         这组姿态PID适合进行姿态稳定,没有震荡,但是跟踪稍慢
         '''
-        self.P_COEFF_TOR = nn.Parameter(torch.tensor([700.0, 700.0, 600.0]))
+        self.P_COEFF_TOR = nn.Parameter(torch.tensor([700.0, 700.0, 600.0])*1.1)
         self.I_COEFF_TOR = nn.Parameter(torch.tensor([0.0, 0.0, 5]))
         self.D_COEFF_TOR = nn.Parameter(torch.tensor([200.0, 200.0, 120.0])*4)
         self.PWM2RPM_SCALE = 0.2685
@@ -79,6 +79,7 @@ class DSLPIDController(nn.Module):
         target_pos, target_vel, target_yaw = torch.split(control_target, [3, 3, 1], dim=-1)
         rpy = quaternion_to_euler(quat)
         rot = quaternion_to_rotation_matrix(quat)
+        rot = rot.float()
         
         batch_shape = controller_state.shape
         integral_pos_error = controller_state.get(
@@ -106,10 +107,7 @@ class DSLPIDController(nn.Module):
         pos_control_input = torch.cat([pos_error, vel_error], dim=-1)
         pos_control_output = target_thrust
 
-        rot = rot.float()
-
-        scalar_thrust = torch.matmul(target_thrust.unsqueeze(1), rot).squeeze(1)[..., 2]
-
+        # position to attitude
         target_z_ax = normalize(target_thrust)
         target_x_c = torch.cat([
             torch.cos(target_yaw), 
@@ -124,16 +122,14 @@ class DSLPIDController(nn.Module):
             target_z_ax
             ], dim=-1)
 
-
-        print('---------------------------------------------------')   
+        # print('---------------------------------------------------')   
         # print('drone position:', pos[0]) 
-        print('pos_error',pos_error[0])
+        # print('pos_error',pos_error[0])
         # print('integral_pos_error',integral_pos_error[0])
-        print('vel_error',vel_error[0])
+        # print('vel_error',vel_error[0])
         # print('target acc: ', target_thrust[0]/self.params["mass"])
 
         # attitute control
-    
         rot_matrix_error =  (
             torch.bmm(target_rot.transpose(-2, -1), rot) 
             - torch.bmm(rot.transpose(-2, -1), target_rot)
@@ -147,46 +143,27 @@ class DSLPIDController(nn.Module):
             dim=-1
         )
 
-        rpy_rates_error = (rpy - last_rpy) / self.dt
+        # rpy_rates_error = (rpy - last_rpy) / self.dt
         body_rate = quat_rotate_inverse(quat, angvel)
-        # integral_rpy_error = integral_rpy_error + rot_error * self.dt
         integral_rpy_error = integral_rpy_error + rot_error * self.dt
         integral_rpy_error.clamp_(-1500.0, 1500.0)
         integral_rpy_error[..., :2].clamp_(-1.0, 1.0)
 
-        # TODO 调参+调正负号
         target_torque = (
             - self.P_COEFF_TOR * rot_error
             - self.I_COEFF_TOR * integral_rpy_error
-            - self.D_COEFF_TOR * rpy_rates_error
+            - self.D_COEFF_TOR * body_rate
         )
         
-        atti_control_input = torch.cat([rot_error, rpy_rates_error], dim=-1)
+        atti_control_input = torch.cat([rot_error, body_rate], dim=-1)
         atti_control_output = target_torque
 
-        target_torque = torch.clip(target_torque, -3200, 3200)
-        # print('控制器期望力矩 ', target_torque[0])
-
         # print('drone euler:', rpy[0])
-        print('rot error:', rot_error[0])
+        # print('rot error:', rot_error[0])
         # print('rpy_rates_error:', rpy_rates_error[0])
         # print('body_rate:',body_rate[0])
         # print('integral_rpy_error:', integral_rpy_error[0])
         # print('target torque:', target_torque[0])
-
-        thrust = (
-            torch.sqrt(scalar_thrust / (4 * self.KF)) - self.PWM2RPM_CONST
-        ) / self.PWM2RPM_SCALE
-        
-        # 扩展 self.MIXER_MATRIX 的维度以适应批量维度
-        mixer_matrix_batched = self.MIXER_MATRIX.unsqueeze(0).expand(target_torque.size(0), -1, -1)
-        torque_mixed = torch.bmm(mixer_matrix_batched, target_torque.unsqueeze(-1)).squeeze(-1)
-        pwm = torch.clip(thrust.unsqueeze(-1) + torque_mixed, 0, 65535)
-
-        # pwm = torch.clip(thrust + self.MIXER_MATRIX @ target_torque, 0, 65535)
-        rpms = self.PWM2RPM_SCALE * pwm + self.PWM2RPM_CONST
-        rpms.nan_to_num_(0.0)
-        cmd = torch.square(rpms / self.MAX_RPM) * 2 - 1
 
         controller_state.update(
             {
@@ -195,13 +172,15 @@ class DSLPIDController(nn.Module):
                 "last_rpy": rpy.reshape(*batch_shape, -1),
             }
         )
-        if cmd.ndim == 2:
-            cmd = cmd.unsqueeze(1)
         
         pos_control_input = pos_control_input.reshape(*batch_shape, -1)
         pos_control_output = pos_control_output.reshape(*batch_shape, -1)
         atti_control_input = atti_control_input.reshape(*batch_shape, -1)
         atti_control_output = atti_control_output.reshape(*batch_shape, -1)
+
+        cmd = self.controlleroutput2cmd(state, pos_control_output, atti_control_output)
+        if cmd.ndim == 2:
+            cmd = cmd.unsqueeze(1)
 
         result = TensorDict(
             {
@@ -215,3 +194,35 @@ class DSLPIDController(nn.Module):
         )
 
         return result, controller_state
+    
+    def controlleroutput2cmd(
+            self,
+            root_state,
+            pos_control_output,
+            atti_control_output,
+    ):
+        batch_shape = pos_control_output.shape[:-1]
+        target_thrust = pos_control_output.reshape(-1, 3)
+        target_torque = atti_control_output.reshape(-1, 3)
+
+        pos, quat, vel, angvel = torch.split(root_state[..., :13], [3, 4, 3, 3], dim=-1)
+        rot = quaternion_to_rotation_matrix(quat)
+        rot = rot.float()
+
+        scalar_thrust = torch.matmul(target_thrust.unsqueeze(1), rot).squeeze(1)[..., 2]
+        thrust = (
+            torch.sqrt(scalar_thrust / (4 * self.KF)) - self.PWM2RPM_CONST
+        ) / self.PWM2RPM_SCALE
+
+        target_torque = torch.clip(target_torque, -3200, 3200)
+        mixer_matrix_batched = self.MIXER_MATRIX.unsqueeze(0).expand(target_torque.size(0), -1, -1)
+        torque_mixed = torch.bmm(mixer_matrix_batched, target_torque.unsqueeze(-1)).squeeze(-1)
+        pwm = torch.clip(thrust.unsqueeze(-1) + torque_mixed, 0, 65535)
+
+        rpms = self.PWM2RPM_SCALE * pwm + self.PWM2RPM_CONST
+        rpms.nan_to_num_(0.0)
+        cmd = torch.square(rpms / self.MAX_RPM) * 2 - 1
+
+        cmd = cmd.reshape(*batch_shape, -1)
+
+        return cmd

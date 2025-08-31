@@ -463,7 +463,7 @@ class HierarchicalDLearning(TensorDictModuleBase):
         torque = tensordict[("agents", "atti_control_output")].reshape(-1, 3)
         thrust = thrust.reshape(*batch_shape, -1)
         torque = torque.reshape(*batch_shape, -1)
-        cmd = self.controller.thrusttorque2cmd(thrust, torque)
+        cmd = self.controller.controlleroutput2cmd(root_state, thrust, torque)
         # CTBR = torch.cat([thrust, torque], dim=-1)
         # CTBR = CTBR.reshape(*batch_shape, -1)
         tensordict.set(("agents","action"), cmd)

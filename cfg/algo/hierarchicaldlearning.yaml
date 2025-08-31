@@ -12,7 +12,7 @@ lyapunov:
     virtual_plan_units: 16
   atti:
     hidden_units: [256, 128, 128, 64]
-    learning_rate: 0.000001
+    learning_rate: 0.00001
     layer_norm: 0
     softplus: false # 是否在输出使用softplus函数，确保V(x)为正值
     enforce_positive: 0  # 是否强制正定

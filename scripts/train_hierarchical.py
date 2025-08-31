@@ -55,7 +55,7 @@ def main(cfg):
     from dlearning.envs import DlearningHoverEnv
     from dlearning.learning import DLearning, HierarchicalDLearning
     from dlearning.utils import ControllerWrapper, HierarchicalControllerWrapper, DSLPIDControllerWrapper, make_batch, tensordict_next_hierarchical_control
-    from dlearning.controllers import Se3PositionControllerCTBR
+    from dlearning.controllers import Se3PositionControllerCTBR, DSLPIDController
     
     print('-----------Create ',cfg.task.name,'------------')
     env = DlearningHoverEnv(cfg = cfg, headless = cfg.headless)
@@ -79,6 +79,13 @@ def main(cfg):
         uav_params = env.drone.params
         ).to(env.device)
     wrapped_policy = HierarchicalControllerWrapper(policy)
+
+    policy = DSLPIDController(
+        dt = cfg.sim.dt, 
+        g = np.linalg.norm(cfg.sim.gravity), 
+        uav_params = env.drone.params
+        ).to(env.device)
+    wrapped_policy = DSLPIDControllerWrapper(policy)
 
     d_learning = HierarchicalDLearning(
         cfg = cfg, 
@@ -132,9 +139,9 @@ def main(cfg):
             # d_learning.train_pos_dfunction(minibatch, run)
             # d_learning.pos_policy_improvement(minibatch, run)
             # print('minibatch形状',minibatch.shape)
-            # d_learning.train_atti_lyapunov(minibatch, run)
+            d_learning.train_atti_lyapunov(minibatch, run)
             # d_learning.train_atti_dfunction(minibatch, run)
-            d_learning.atti_policy_improvement(minibatch, run)
+            # d_learning.atti_policy_improvement(minibatch, run)
 
         pbar.set_postfix({"rollout_fps": collector._fps, "frames": collector._frames})
 

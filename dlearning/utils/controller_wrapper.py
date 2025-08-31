@@ -78,13 +78,6 @@ class HierarchicalControllerWrapper(torch.nn.Module):
             tensordict.set(("agents", key), result[key])
         return tensordict
 
-        # result = TensorDict({
-        #     "action":CTBR,
-        #     "pos_control_input":pos_control_input,
-        #     "pos_control_output":pos_control_output,
-        #     "att_control_input":atti_control_input,
-        #     "att_control_output":atti_control_output,
-        # },batch_size=batch_shape)
 
 class DSLPIDControllerWrapper(torch.nn.Module):
     def __init__(self, controller):

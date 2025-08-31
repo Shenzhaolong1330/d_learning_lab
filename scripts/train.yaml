@@ -39,8 +39,8 @@ wandb:
   tags: 
 
 # checkpoint_path: swanlog/run-20250826_110601-34db79b4
-checkpoint_path: swanlog/run-20250827_195619-e5dfbd67
-checkpoint_episode: 6
+checkpoint_path: null
+checkpoint_episode: final
 # checkpoint_path: swanlog/run-20250723_134337-9a2696a9
 # checkpoint_episode: 3
 
@@ -52,7 +52,7 @@ defaults:
 env:
   num_envs: 1024
   env_spacing: 0
-  max_episode_length: 512
+  max_episode_length: 256
   # pos 400 
   # atti 64
 

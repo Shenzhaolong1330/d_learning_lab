@@ -73,9 +73,18 @@ def main(cfg):
     # env = TransformedEnv(env, Compose(*transforms)).train()
     
     env.set_seed(cfg.seed)
-    # policy1 = Se3PositionControllerCTBR(g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
-    # wrapped_policy = HierarchicalControllerWrapper(policy1)
-    policy1 = DSLPIDController(dt = cfg.sim.dt, g = np.linalg.norm(cfg.sim.gravity), uav_params = env.drone.params).to(env.device)
+
+    policy1 = Se3PositionControllerCTBR(
+        g = np.linalg.norm(cfg.sim.gravity), 
+        uav_params = env.drone.params
+        ).to(env.device)
+    wrapped_policy = HierarchicalControllerWrapper(policy1)
+    
+    policy1 = DSLPIDController(
+        dt = cfg.sim.dt, 
+        g = np.linalg.norm(cfg.sim.gravity), 
+        uav_params = env.drone.params
+        ).to(env.device)
     wrapped_policy = DSLPIDControllerWrapper(policy1)
 
     # TODO: 去掉模仿学习试试
@@ -116,8 +125,8 @@ def main(cfg):
     import matplotlib.pyplot as plt
 
     # 提取数据 [timesteps, 6]
-    data = trajs["agents"]["atti_control_output"][3, :, 0, :].cpu().detach().numpy()
-    data1 = trajs["agents"]["atti_control_input"][3, :, 0, :].cpu().detach().numpy()
+    data = trajs["agents"]["atti_control_output"][6, :, 0, :].cpu().detach().numpy()
+    data1 = trajs["agents"]["atti_control_input"][6, :, 0, :].cpu().detach().numpy()
     timesteps = np.arange(data.shape[0])
     colors = plt.cm.tab20(np.linspace(0, 1, 9))
     plt.figure(figsize=(12, 6))

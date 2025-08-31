@@ -538,7 +538,7 @@ class Se3PositionControllerCTBR(nn.Module):
         # CTBR = CTBR.reshape(*batch_shape, -1)
 
         # 2 Thrust&Torque Control
-        cmd = self.thrusttorque2cmd(thrust, atti_control_output)
+        cmd = self.controlleroutput2cmd(root_state, pos_control_output, atti_control_output)
 
         result = TensorDict(
             {
@@ -599,8 +599,8 @@ class Se3PositionControllerCTBR(nn.Module):
         thrust = -self.mass * (acc * R[:, :, 2]).sum(-1, True)
 
         pos_control_input = torch.cat([pos_error, vel_error], dim=-1)
-
         pos_control_output = acc
+
         return pos_control_input, pos_control_output, R_des, thrust
     
     def attitude_control_BR(
@@ -778,25 +778,24 @@ class Se3PositionControllerCTBR(nn.Module):
         atti_control_output = angacc_des
 
         return atti_control_input, atti_control_output
-
-    def thrusttorque2cmd(
+  
+    def controlleroutput2cmd(
         self,
-        thrust: torch.Tensor,
-        torque: torch.Tensor,
+        root_state: torch.Tensor,
+        pos_control_output: torch.Tensor,
+        atti_control_output: torch.Tensor,
     ):
-        batch_shape = thrust.shape[:-1]
-        angacc_thrust = torch.cat([torque, thrust], dim=-1)
+        batch_shape = pos_control_output.shape[:-1]
+        target_acc = pos_control_output.reshape(-1, 3)
+        target_angacc = atti_control_output.reshape(-1, 3)
+        pos, rot, vel, ang_vel_w = torch.split(root_state, [3, 4, 3, 3], dim=-1)
+        R = quaternion_to_rotation_matrix(rot)
+        target_acc = -self.mass * (target_acc * R[:, :, 2]).sum(-1, True)
+
+        angacc_thrust = torch.cat([target_angacc, target_acc], dim=-1) 
         angacc_thrust = angacc_thrust.reshape(-1, 4)
         angacc_thrust = angacc_thrust.to(self.mixer.dtype)
         
-        print(self.mixer)
-        # Parameter containing:
-        # tensor([[ 1.2210e-10, -2.0588e-02,  1.8750e-01,  2.5000e-01],
-        #         [ 2.0588e-02,  7.7785e-10, -1.8750e-01,  2.5000e-01],
-        #         [ 1.2210e-10,  2.0588e-02,  1.8750e-01,  2.5000e-01],
-        #         [-2.0588e-02, -1.0220e-09, -1.8750e-01,  2.5000e-01]], device='cuda:0',
-        #     requires_grad=True)
-
         cmd = (self.mixer @ angacc_thrust.T).T
         cmd = (cmd / self.max_thrusts) * 2 - 1
         cmd = cmd.reshape(*batch_shape, -1)
