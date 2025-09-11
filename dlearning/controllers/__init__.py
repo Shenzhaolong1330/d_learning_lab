@@ -5,3 +5,4 @@ from .SE3_controller import (
     Se3PositionControllerCTBR
     )
 from .dsl_pid_controller import DSLPIDController
+from .ctbr_and_rate_controller import CTBRController

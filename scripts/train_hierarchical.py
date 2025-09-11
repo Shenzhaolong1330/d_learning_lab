@@ -123,25 +123,30 @@ def main(cfg):
     # env.train()
     print('------------start training-------------')
     for i, data in enumerate(pbar):
-
+        # env.reset()
         data = data.detach().clone()
         data = tensordict_next_hierarchical_control(data)
-        episode_stats.add(data.to_tensordict())
+        # episode_stats.add(data.to_tensordict())
+        '''
+        所有数据同时训练，GD的步数就多一些
+        使用minibatch训练，GD的步数就少一些
+        '''
         # d_learning.train_pos_lyapunov(data, run)
         # d_learning.train_pos_dfunction(data, run)
         # d_learning.pos_policy_improvement(data, run)
         # d_learning.train_atti_lyapunov(data, run)
+        # d_learning.train_atti_dfunction(data, run)
+        # d_learning.atti_policy_improvement(data, run)
         batch = make_batch(data, cfg.num_minibatches)
         for minibatch in tqdm(batch, desc="Processing minibatches"):
             # d_learning.train_pos_lyapunov(minibatch, run)
             # d_learning.train_pos_dfunction(minibatch, run)
-            # d_learning.pos_policy_improvement(minibatch, run)
-            # print('minibatch形状',minibatch.shape)
+            d_learning.pos_policy_improvement(minibatch, run)
             d_learning.train_atti_lyapunov(minibatch, run)
-            # d_learning.train_atti_dfunction(minibatch, run)
-            # d_learning.atti_policy_improvement(minibatch, run)
-
+            d_learning.train_atti_dfunction(minibatch, run)
+            d_learning.atti_policy_improvement(minibatch, run)
         pbar.set_postfix({"rollout_fps": collector._fps, "frames": collector._frames})
+        env.reset()
 
         if max_iters > 0 and i >= max_iters - 1:
             break 
@@ -176,6 +181,7 @@ def main(cfg):
     print(f"final model saved to ",run.public.run_dir)
 
     env.eval()
+    env.reset()
     trajs = env.rollout(
         max_steps=256,
         policy=wrapped_policy,
@@ -183,9 +189,11 @@ def main(cfg):
         break_when_any_done=False,
         return_contiguous=False,
     )
+    trajs = trajs.detach().clone()
+    trajs = tensordict_next_hierarchical_control(trajs)
     # d_learning.eval_pos_lyapunov(trajs, run) 
     d_learning.eval_atti_lyapunov(trajs, run)
-    
+    d_learning.eval_atti_dfunction(trajs, run)  
     env.enable_render(not cfg.headless)
     env.reset()
 

@@ -4,10 +4,12 @@ from tensordict import TensorDict
 
 from omni_drones.utils.torch import quat_rotate_inverse, normalize, quaternion_to_euler, quaternion_to_rotation_matrix
 
-# TODO 调试控制器
 
-class DSLPIDController(nn.Module):
+class CTBRController(nn.Module):
     def __init__(self, dt: float, g: float, uav_params) -> None:
+        '''
+        controller outputs CTBR command
+        '''
         super().__init__()
         self.params = uav_params
         # self.P_COEFF_FOR = nn.Parameter(torch.tensor([0.4, 0.4, 1.25]))
@@ -18,27 +20,14 @@ class DSLPIDController(nn.Module):
             I可以减小稳态误差,但是太大会有超调,
             D可以抑制速度变化,减少震荡,但是太大会导致系统收敛缓慢
         '''
-        self.P_COEFF_FOR = nn.Parameter(torch.tensor([0.06, 0.06, 0.15]))
-        self.I_COEFF_FOR = nn.Parameter(torch.tensor([0.0, 0.0, 0.05]))
+        self.P_COEFF_FOR = nn.Parameter(torch.tensor([0.06, 0.06, 0.10])*3)
+        self.I_COEFF_FOR = nn.Parameter(torch.tensor([0.0, 0.0, 0.0]))
         self.D_COEFF_FOR = nn.Parameter(torch.tensor([0.15, 0.15, 0.25]))
-        '''
-        这组姿态PID适合进行快速跟踪,有震荡但是跟踪很快
-        '''
-        # self.P_COEFF_TOR = nn.Parameter(torch.tensor([70000.0, 70000.0, 60000.0]))
-        # self.I_COEFF_TOR = nn.Parameter(torch.tensor([500.0, 500.0, 500.0]))
-        # self.D_COEFF_TOR = nn.Parameter(torch.tensor([20000.0, 20000.0, 12000.0]))
-        '''
-        这组姿态PID适合进行姿态稳定,没有震荡,但是跟踪稍慢
-        '''
-        self.P_COEFF_TOR = nn.Parameter(torch.tensor([700.0, 700.0, 600.0])*1.1)
-        self.I_COEFF_TOR = nn.Parameter(torch.tensor([0.0, 0.0, 5]))
-        self.D_COEFF_TOR = nn.Parameter(torch.tensor([200.0, 200.0, 120.0])*4)
-        '''
-        这组姿态PID适合进行姿态稳定和位置控制,没有震荡,跟踪较慢
-        '''
-        # self.P_COEFF_TOR = nn.Parameter(torch.tensor([700.0, 700.0, 600.0])*12.0)
-        # self.I_COEFF_TOR = nn.Parameter(torch.tensor([0.0, 0.0, 5]))
-        # self.D_COEFF_TOR = nn.Parameter(torch.tensor([200.0, 200.0, 120.0])*13.0)
+        
+        self.P_COEFF_RATE = nn.Parameter(torch.tensor([5.0, 5.0, 3.0])*.8)
+
+        self.P_COEFF_TOR = nn.Parameter(torch.tensor([700.0, 700.0, 600.0])*15.2)
+
         self.PWM2RPM_SCALE = 0.2685
         self.PWM2RPM_CONST = 4070.3
         self.MIN_PWM = 20000.0
@@ -91,10 +80,6 @@ class DSLPIDController(nn.Module):
         integral_pos_error = controller_state.get(
             "integral_pos_error", torch.zeros_like(pos)
         ).reshape(-1, 3)
-        integral_rpy_error = controller_state.get(
-            "integral_rpy_error", torch.zeros_like(rpy)
-        ).reshape(-1, 3)
-        last_rpy = controller_state.get("last_rpy", rpy).reshape(-1, 3)
 
         # position control
         pos_error = target_pos - pos
@@ -109,6 +94,7 @@ class DSLPIDController(nn.Module):
             + self.GRAVITY
         )
         target_thrust = target_thrust.float()
+        scalar_thrust = torch.matmul(target_thrust.unsqueeze(1), rot)[..., 2]
 
         pos_control_input = torch.cat([pos_error, vel_error], dim=-1)
         pos_control_output = target_thrust
@@ -149,33 +135,15 @@ class DSLPIDController(nn.Module):
             dim=-1
         )
 
-        # rpy_rates_error = (rpy - last_rpy) / self.dt
-        body_rate = quat_rotate_inverse(quat, angvel)
-        integral_rpy_error = integral_rpy_error + rot_error * self.dt
-        integral_rpy_error.clamp_(-1500.0, 1500.0)
-        integral_rpy_error[..., :2].clamp_(-1.0, 1.0)
-
-        target_torque = (
-            - self.P_COEFF_TOR * rot_error
-            - self.I_COEFF_TOR * integral_rpy_error
-            - self.D_COEFF_TOR * body_rate
-        )
+        target_body_rate = - self.P_COEFF_RATE * rot_error
+        # target_body_rate = torch.ones_like(rot_error)*0.1
         
-        atti_control_input = torch.cat([rot_error, body_rate], dim=-1)
-        atti_control_output = target_torque
-
-        # print('drone euler:', rpy[0])
-        # print('rot error:', rot_error[0])
-        # print('rpy_rates_error:', rpy_rates_error[0])
-        # print('body_rate:',body_rate[0])
-        # print('integral_rpy_error:', integral_rpy_error[0])
-        # print('target torque:', target_torque[0])
+        atti_control_input = rot_error
+        atti_control_output = target_body_rate
 
         controller_state.update(
             {
-                "integral_pos_error": integral_pos_error.reshape(*batch_shape, -1),
-                "integral_rpy_error": integral_rpy_error.reshape(*batch_shape, -1),
-                "last_rpy": rpy.reshape(*batch_shape, -1),
+                "integral_pos_error": integral_pos_error.reshape(*batch_shape, -1)
             }
         )
         
@@ -183,10 +151,16 @@ class DSLPIDController(nn.Module):
         pos_control_output = pos_control_output.reshape(*batch_shape, -1)
         atti_control_input = atti_control_input.reshape(*batch_shape, -1)
         atti_control_output = atti_control_output.reshape(*batch_shape, -1)
+        
+        CTBR = torch.cat([scalar_thrust, target_body_rate], dim=-1).reshape(*batch_shape, -1)
 
-        cmd = self.controlleroutput2cmd(state, pos_control_output, atti_control_output)
-        if cmd.ndim == 2:
-            cmd = cmd.unsqueeze(1)
+        if CTBR.ndim == 2:
+            CTBR = CTBR.unsqueeze(1)
+
+        cmd = self.CTBR2cmd(
+            root_state = state,
+            CTBR = CTBR
+        )
 
         result = TensorDict(
             {
@@ -201,26 +175,30 @@ class DSLPIDController(nn.Module):
 
         return result, controller_state
     
-    def controlleroutput2cmd(
+    def CTBR2cmd(
             self,
             root_state,
-            pos_control_output,
-            atti_control_output,
+            CTBR
     ):
-        batch_shape = pos_control_output.shape[:-1]
-        target_thrust = pos_control_output.reshape(-1, 3)
-        target_torque = atti_control_output.reshape(-1, 3)
+        batch_shape = CTBR.shape[:-1]
+        CTBR = CTBR.reshape(-1, 4)
+        scalar_thrust = CTBR[..., 0]
+        target_body_rate = CTBR[..., 1:]
 
         pos, quat, vel, angvel = torch.split(root_state[..., :13], [3, 4, 3, 3], dim=-1)
         rot = quaternion_to_rotation_matrix(quat)
         rot = rot.float()
-
-        scalar_thrust = torch.matmul(target_thrust.unsqueeze(1), rot).squeeze(1)[..., 2]
+        
         thrust = (
             torch.sqrt(scalar_thrust / (4 * self.KF)) - self.PWM2RPM_CONST
         ) / self.PWM2RPM_SCALE
-
+        
+        body_rate = quat_rotate_inverse(quat, angvel)
+        body_rate_error = target_body_rate - body_rate
+        print('body_rate_error: ',body_rate_error[0])
+        target_torque = self.P_COEFF_TOR * body_rate_error
         target_torque = torch.clip(target_torque, -3200, 3200)
+
         mixer_matrix_batched = self.MIXER_MATRIX.unsqueeze(0).expand(target_torque.size(0), -1, -1)
         torque_mixed = torch.bmm(mixer_matrix_batched, target_torque.unsqueeze(-1)).squeeze(-1)
         pwm = torch.clip(thrust.unsqueeze(-1) + torque_mixed, 0, 65535)

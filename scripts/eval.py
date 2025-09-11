@@ -55,7 +55,7 @@ def main(cfg):
     from dlearning.envs import DlearningHoverEnv
     from dlearning.learning import DLearning, HierarchicalDLearning
     from dlearning.utils import ControllerWrapper, HierarchicalControllerWrapper, DSLPIDControllerWrapper, tensordict_next_hierarchical_control
-    from dlearning.controllers import Se3PositionController,Se3PositionControllerCTBR, DSLPIDController
+    from dlearning.controllers import Se3PositionController,Se3PositionControllerCTBR, DSLPIDController, CTBRController
 
     print('-----------Create ',cfg.task.name,'------------')
     env = DlearningHoverEnv(cfg = cfg, headless = cfg.headless)
@@ -80,14 +80,18 @@ def main(cfg):
     #     ).to(env.device)
     # wrapped_policy = HierarchicalControllerWrapper(policy1)
     
-    policy1 = DSLPIDController(
+    # policy1 = DSLPIDController(
+    #     dt = cfg.sim.dt, 
+    #     g = np.linalg.norm(cfg.sim.gravity), 
+    #     uav_params = env.drone.params
+    #     ).to(env.device)
+    
+    policy1 = CTBRController(
         dt = cfg.sim.dt, 
         g = np.linalg.norm(cfg.sim.gravity), 
         uav_params = env.drone.params
         ).to(env.device)
     wrapped_policy = DSLPIDControllerWrapper(policy1)
-
-    # TODO: 去掉模仿学习试试
 
     policy = HierarchicalDLearning(
         cfg = cfg, 
@@ -99,7 +103,7 @@ def main(cfg):
         )
     # frames_per_batch = env.num_envs * env.max_episode_length
 
-    # env.eval()
+    env.eval()
     # trajs = env.rollout(
     #     max_steps=env.max_episode_length,
     #     policy=policy,
@@ -109,8 +113,8 @@ def main(cfg):
     # )
     # policy.eval_pos_lyapunov(trajs,run)
     # policy.eval_atti_lyapunov(trajs, run)
-    env.reset()
-
+    
+    # env.reset()
     trajs = env.rollout(
         max_steps=env.max_episode_length,
         policy=wrapped_policy,
@@ -120,13 +124,17 @@ def main(cfg):
     )
 
     # policy.eval_pos_lyapunov(trajs, run)
-    policy.eval_atti_lyapunov(trajs, run)
+    # policy.eval_atti_lyapunov(trajs, run)
+    # trajs = trajs.detach().clone()
+    # trajs = tensordict_next_hierarchical_control(trajs)
+
+    # policy.eval_atti_lyapunov(trajs, run)
+    # policy.eval_atti_dfunction(trajs, run)
     
     import matplotlib.pyplot as plt
 
-    # 提取数据 [timesteps, 6]
     data = trajs["agents"]["atti_control_output"][6, :, 0, :].cpu().detach().numpy()
-    data1 = trajs["agents"]["atti_control_input"][6, :, 0, :].cpu().detach().numpy()
+    data1 = trajs["agents"]["pos_control_input"][15, :, 0, :].cpu().detach().numpy()
     timesteps = np.arange(data.shape[0])
     colors = plt.cm.tab20(np.linspace(0, 1, 9))
     plt.figure(figsize=(12, 6))

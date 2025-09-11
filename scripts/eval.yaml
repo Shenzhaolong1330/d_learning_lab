@@ -14,7 +14,7 @@ total_frames: 20000
 max_iters: -1
 eval_interval: -1
 save_interval: -1
-seed: 1
+seed: 114
 
 viewer:
   resolution: [960, 720]
@@ -33,7 +33,7 @@ wandb:
   monitor_gym: True
   tags: 
 
-checkpoint_path: swanlog/run-20250831_142414-5b56e8cb
+checkpoint_path: swanlog/run-20250911_153138-91cad4f6
 # swanlog/run-20250826_103947-d4abc3b2
 checkpoint_episode: final
 
@@ -43,7 +43,7 @@ defaults:
   - _self_
 
 env:
-  num_envs: 16
+  num_envs: 32
   env_spacing: 0
   max_episode_length: 256
   # pos 400 

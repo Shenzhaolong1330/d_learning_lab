@@ -12,7 +12,7 @@ lyapunov:
     virtual_plan_units: 16
   atti:
     hidden_units: [256, 128, 128, 64]
-    learning_rate: 0.000001
+    learning_rate: 0.00005
     layer_norm: 0
     softplus: false # 是否在输出使用softplus函数，确保V(x)为正值
     enforce_positive: 0  # 是否强制正定
@@ -21,29 +21,29 @@ lyapunov:
 dfunction:
   pos:
     hidden_units: [256, 128, 128, 64]
-    learning_rate: 0.00001
+    learning_rate: 0.0000001
     layer_norm: true
   atti:
     hidden_units: [256, 128, 128, 64]
-    learning_rate: 0.00001
+    learning_rate: 0.0000001
     layer_norm: true
 
 controller:
   pos:
-    hidden_units: [64, 64, 16]
-    learning_rate: 0.001
+    hidden_units: [128, 64, 64, 16]
+    learning_rate: 0.0005
     layer_norm: true
   atti:
-    hidden_units: [64, 64, 16]
-    learning_rate: 0.00001
+    hidden_units: [128, 64, 64, 16]
+    learning_rate: 0.002
     layer_norm: true
 
 learning:
   pos:
-    lyapunov_GD_steps: 1
-    dfunction_GD_steps: 1
-    controller_GD_steps: 1
-  atti:
     lyapunov_GD_steps: 100
-    dfunction_GD_steps: 1
-    controller_GD_steps: 1
+    dfunction_GD_steps: 100
+    controller_GD_steps: 1000
+  atti:
+    lyapunov_GD_steps: 1000
+    dfunction_GD_steps: 1000
+    controller_GD_steps: 1000

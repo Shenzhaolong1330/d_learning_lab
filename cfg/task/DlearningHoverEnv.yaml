@@ -15,7 +15,7 @@ time_encoding: false
 
 init_state: random1 # fixed_zero #　random2
 
-train_mode: atti # atti
+train_mode: pos # atti
 
 reward_effort_weight: 0.1
 reward_action_smoothness_weight: 0.0
