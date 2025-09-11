@@ -121,8 +121,8 @@ class DlearningHoverEnv(IsaacEnv):
             case 'fixed_zero':
                 print("init as fixed_zero")
                 self.init_pos_dist = D.Uniform(
-                    torch.tensor([0., 0., 8.3], device=self.device),
-                    torch.tensor([0., 0., 8.3], device=self.device)
+                    torch.tensor([0., 0., 8.0], device=self.device),
+                    torch.tensor([0., 0., 8.0], device=self.device)
                 )
                 self.init_rpy_dist = D.Uniform(
                     torch.tensor([0., 0., 0.], device=self.device) * torch.pi,

@@ -40,7 +40,7 @@ def tensordict_next_hierarchical_control(tensordict: TensorDict):
     # 创建目标空间（保持相同形状）
     next_pos = torch.zeros_like(pos_control)
     next_atti = torch.zeros_like(atti_control)
-    
+    # print('shape',pos_control.shape)
     # 核心修改：正确对齐时间步维度
     # 将当前步[1:N]的数据赋值给下一步[0:N-1]
     next_pos[:, :-1] = pos_control[:, 1:]  # 修改切片维度为时间步维度
