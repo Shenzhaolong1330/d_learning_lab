@@ -53,7 +53,7 @@ def main(cfg):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, project_root)
     from dlearning.envs import DlearningHoverEnv
-    from dlearning.learning import DLearning, HierarchicalDLearning
+    from dlearning.learning import DLearning, HierarchicalDLearning, HierarchicalDLearning_pk
     from dlearning.utils import ControllerWrapper, HierarchicalControllerWrapper, DSLPIDControllerWrapper, tensordict_next_hierarchical_control
     from dlearning.controllers import Se3PositionController,Se3PositionControllerCTBR, DSLPIDController, CTBRController
 
@@ -93,7 +93,8 @@ def main(cfg):
         ).to(env.device)
     wrapped_policy = DSLPIDControllerWrapper(policy1)
 
-    policy = HierarchicalDLearning(
+    # policy = HierarchicalDLearning(
+    policy = HierarchicalDLearning_pk(
         cfg = cfg, 
         uav_params = env.drone.params, 
         observation_spec = env.observation_spec, 
@@ -104,25 +105,39 @@ def main(cfg):
     # frames_per_batch = env.num_envs * env.max_episode_length
 
     env.eval()
-    # trajs = env.rollout(
-    #     max_steps=env.max_episode_length,
-    #     policy=policy,
-    #     auto_reset=True,
-    #     break_when_any_done=False,
-    #     return_contiguous=False,
-    # )
-    # policy.eval_pos_lyapunov(trajs,run)
-    # policy.eval_atti_lyapunov(trajs, run)
-    
-    # env.reset()
     trajs = env.rollout(
         max_steps=env.max_episode_length,
-        policy=wrapped_policy,
+        policy=policy,
         auto_reset=True,
         break_when_any_done=False,
         return_contiguous=False,
     )
-
+    policy.eval_pos_lyapunov(trajs,run)
+    policy.eval_atti_lyapunov(trajs, run)
+    policy.plot_lyapunov_contour(trajs, select = 'atti', save_fig = True, save_path = run.public.run_dir, index = 1)
+    policy.plot_dfunction_contour(trajs, select = 'atti', save_fig = True, save_path = run.public.run_dir, index = 1)
+    policy.plot_lyapunov_contour(trajs, 
+                                 xlim = 1.0,
+                                 ylim = 1.0,
+                                 select = 'pos', 
+                                 save_fig = True, 
+                                 save_path = run.public.run_dir, 
+                                 index = 1)
+    policy.plot_dfunction_contour(trajs, 
+                                  xlim = 1.0,
+                                  ylim = 1.0,
+                                  select = 'pos', 
+                                  save_fig = True, 
+                                  save_path = run.public.run_dir, 
+                                  index = 1)     
+    # env.reset()
+    # trajs = env.rollout(
+    #     max_steps=env.max_episode_length,
+    #     policy=wrapped_policy,
+    #     auto_reset=True,
+    #     break_when_any_done=False,
+    #     return_contiguous=False,
+    # )
     # policy.eval_pos_lyapunov(trajs, run)
     # policy.eval_atti_lyapunov(trajs, run)
     # trajs = trajs.detach().clone()
@@ -132,11 +147,12 @@ def main(cfg):
     # policy.eval_atti_dfunction(trajs, run)
     
     import matplotlib.pyplot as plt
-
+    # print(trajs["agents"]["atti_control_output"].shape)
     data = trajs["agents"]["atti_control_output"][6, :, 0, :].cpu().detach().numpy()
-    data1 = trajs["agents"]["pos_control_input"][15, :, 0, :].cpu().detach().numpy()
-    timesteps = np.arange(data.shape[0])
-    colors = plt.cm.tab20(np.linspace(0, 1, 9))
+    data1 = trajs["agents"]["pos_control_input"][:, :, 0, 0].cpu().detach().numpy()
+    # [64 16 1 3]
+    timesteps = np.arange(data1.shape[1])
+    colors = plt.cm.tab20(np.linspace(0, 1, 64))
     plt.figure(figsize=(12, 6))
     # plt.plot(timesteps, data1[:, 0], 
     #         color=colors[1],
@@ -150,11 +166,13 @@ def main(cfg):
     #         color=colors[3],
     #         linewidth=1.5,
     #         label=f'control torque')
-    for i in range(6):
-        plt.plot(timesteps, data1[:, i], 
+    
+    for i in range(64):
+        plt.plot(timesteps, data1[i, :], 
                 color=colors[i],
                 linewidth=1.5,
                 label=f'State {i+1}')
+        
     # for i in range(3):
     #     plt.plot(timesteps, data[:, i], 
     #             color=colors[i+6],

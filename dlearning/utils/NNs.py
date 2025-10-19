@@ -43,8 +43,8 @@ class LyapunovFunction(nn.Module):
         self.softplus = nn.Softplus() if cfg.softplus else None  
         
         # 添加可学习的缩放系数
-        self.alpha = nn.Parameter(torch.tensor(0.1))  
-        self.beta = nn.Parameter(torch.tensor(1.0))
+        self.alpha = nn.Parameter(torch.tensor(1.0))  
+        self.beta = nn.Parameter(torch.tensor(0.1))
         
         self.net = nn.Sequential(*layers)
 
@@ -56,8 +56,8 @@ class LyapunovFunction(nn.Module):
         if self.softplus is not None:
             nn_term = self.softplus(nn_term)
         
-        # return self.alpha * base + self.beta * nn_term
-        return nn_term
+        return self.alpha * base + self.beta * nn_term
+        # return nn_term
 
 
 class StructuredLyapunovFunction(nn.Module):
@@ -241,40 +241,6 @@ class DFunctionwithPriorKnowledge(nn.Module):
         virtualdynamics = self.net(cat)
         return virtualdynamics
     
-# class DFunctionwithPriorKnowledge(nn.Module):
-#     def __init__(self, cfg, Lyapunovfunction):
-#         super().__init__()
-#         self.Lyapunovfunction = Lyapunovfunction
-
-#         # 冻结Lyapunovfunction的参数
-#         for p in self.Lyapunovfunction.parameters():
-#             p.requires_grad_(False)
-
-#         layers = []
-#         num_units = cfg.hidden_units
-#         for n in num_units:
-#             layers.append(nn.LazyLinear(n))
-#             layers.append(nn.LeakyReLU())
-#             if cfg.layer_norm:
-#                 layers.append(nn.LayerNorm(n))
-#         layers.append(nn.LazyLinear(6))
-
-#         self.net = nn.Sequential(*layers)
-
-#     def forward(self, state: torch.Tensor, action: torch.Tensor):
-#         '''
-#         D(x,u) = JV(x)^T*f(x,u)
-#         '''
-#         cat = torch.cat([state, action], dim=-1)  # [..., n_states + n_actions]
-#         virtualdynamics = self.net(cat)
-#         print('virtualdynamics.shape:', virtualdynamics.shape)
-#         # torch.Size([4, 1])
-#         V, JV = self.Lyapunovfunction.V_with_JV(state)
-#         print('JV[0]:', JV[0])
-#         print('JV[0].shape:', JV[0].shape)
-#         D = JV[0] * virtualdynamics
-#         return D
-
 
 
 class NNController(nn.Module):
@@ -322,3 +288,25 @@ class GRUController(nn.Module):
         output, hidden = self.gru(state)
         return self.fc(output[:, -1, :])
 
+
+class Dynamics(nn.Module):
+    def __init__(self, cfg):
+        super().__init__()
+        layers = []
+        num_units = cfg.hidden_units
+        for n in num_units:
+            layers.append(nn.LazyLinear(n))
+            layers.append(nn.LeakyReLU())
+            if cfg.layer_norm:
+                layers.append(nn.LayerNorm(n))
+        layers.append(nn.LazyLinear(cfg.state_dim))
+
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, state: torch.Tensor, action: torch.Tensor):
+        '''
+        xt+1 = f(xt,ut)
+        '''
+        cat = torch.cat([state, action], dim=-1)  # [..., n_states + n_actions]
+        next_state = self.net(cat)
+        return next_state

@@ -21,7 +21,7 @@ class CTBRController(nn.Module):
             D可以抑制速度变化,减少震荡,但是太大会导致系统收敛缓慢
         '''
         self.P_COEFF_FOR = nn.Parameter(torch.tensor([0.06, 0.06, 0.10])*3)
-        self.I_COEFF_FOR = nn.Parameter(torch.tensor([0.0, 0.0, 0.0]))
+        self.I_COEFF_FOR = nn.Parameter(torch.tensor([0.0, 0.0, 0.001]))
         self.D_COEFF_FOR = nn.Parameter(torch.tensor([0.15, 0.15, 0.25]))
         
         self.P_COEFF_RATE = nn.Parameter(torch.tensor([5.0, 5.0, 3.0])*.8)
@@ -137,7 +137,7 @@ class CTBRController(nn.Module):
 
         target_body_rate = - self.P_COEFF_RATE * rot_error
         # target_body_rate = torch.ones_like(rot_error)*0.1
-        
+        # print('e_rot:', rot_error[0], ' body_rate: ', target_body_rate[0])
         atti_control_input = rot_error
         atti_control_output = target_body_rate
 
@@ -195,7 +195,7 @@ class CTBRController(nn.Module):
         
         body_rate = quat_rotate_inverse(quat, angvel)
         body_rate_error = target_body_rate - body_rate
-        print('body_rate_error: ',body_rate_error[0])
+        # print('body_rate_error: ',body_rate_error[0])
         target_torque = self.P_COEFF_TOR * body_rate_error
         target_torque = torch.clip(target_torque, -3200, 3200)
 

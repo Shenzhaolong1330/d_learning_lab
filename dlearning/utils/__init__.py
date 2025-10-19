@@ -16,5 +16,6 @@ from .NNs import (
     DFunction,
     DFunctionwithPriorKnowledge,
     NNController,
-    GRUController
+    GRUController,
+    Dynamics
 )

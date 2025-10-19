@@ -53,9 +53,9 @@ def main(cfg):
     project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
     sys.path.insert(0, project_root)
     from dlearning.envs import DlearningHoverEnv
-    from dlearning.learning import DLearning, HierarchicalDLearning
+    from dlearning.learning import DLearning, HierarchicalDLearning, HierarchicalDLearning_pk
     from dlearning.utils import ControllerWrapper, HierarchicalControllerWrapper, DSLPIDControllerWrapper, make_batch, tensordict_next_hierarchical_control
-    from dlearning.controllers import Se3PositionControllerCTBR, DSLPIDController
+    from dlearning.controllers import Se3PositionControllerCTBR, DSLPIDController, CTBRController
     
     print('-----------Create ',cfg.task.name,'------------')
     env = DlearningHoverEnv(cfg = cfg, headless = cfg.headless)
@@ -80,14 +80,21 @@ def main(cfg):
     #     ).to(env.device)
     # wrapped_policy = HierarchicalControllerWrapper(policy)
 
-    policy = DSLPIDController(
+    # policy = DSLPIDController(
+    #     dt = cfg.sim.dt, 
+    #     g = np.linalg.norm(cfg.sim.gravity), 
+    #     uav_params = env.drone.params
+    #     ).to(env.device)
+
+    policy = CTBRController(
         dt = cfg.sim.dt, 
         g = np.linalg.norm(cfg.sim.gravity), 
         uav_params = env.drone.params
         ).to(env.device)
     wrapped_policy = DSLPIDControllerWrapper(policy)
 
-    d_learning = HierarchicalDLearning(
+    # d_learning = HierarchicalDLearning(
+    d_learning = HierarchicalDLearning_pk(
         cfg = cfg, 
         uav_params = env.drone.params, 
         observation_spec = env.observation_spec, 
@@ -138,45 +145,77 @@ def main(cfg):
         # d_learning.train_atti_dfunction(data, run)
         # d_learning.atti_policy_improvement(data, run)
         batch = make_batch(data, cfg.num_minibatches)
+        j=0
         for minibatch in tqdm(batch, desc="Processing minibatches"):
-            # d_learning.train_pos_lyapunov(minibatch, run)
-            # d_learning.train_pos_dfunction(minibatch, run)
+            
+            if cfg.task.train_mode == 'pos':
+                d_learning.train_pos_lyapunov(minibatch, run)
+                d_learning.train_pos_dfunction(minibatch, run)
+            elif cfg.task.train_mode == 'atti':
+                d_learning.train_atti_lyapunov(minibatch, run)
+                d_learning.train_atti_dfunction(minibatch, run)
+                
             d_learning.pos_policy_improvement(minibatch, run)
-            d_learning.train_atti_lyapunov(minibatch, run)
-            d_learning.train_atti_dfunction(minibatch, run)
             d_learning.atti_policy_improvement(minibatch, run)
-        pbar.set_postfix({"rollout_fps": collector._fps, "frames": collector._frames})
-        env.reset()
+            j+=1
+        # pbar.set_postfix({"rollout_fps": collector._fps, "frames": collector._frames})
+        # env.reset()
+            if save_interval > 0 and (j-1) % save_interval == 0:
+                pos_lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"pos_lyapunov_checkpoint_minibatch_{j}.pt")
+                # pos_dfunction_ckpt_path = os.path.join(run.public.run_dir, f"pos_dfunction_checkpoint_episode_{i}.pt")
+                pos_dynamics_ckpt_path = os.path.join(run.public.run_dir, f"pos_dynamics_checkpoint_minibatch_{j}.pt")
+                pos_controller_ckpt_path = os.path.join(run.public.run_dir, f"pos_controller_checkpoint_minibatch_{j}.pt")
+                atti_lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"atti_lyapunov_checkpoint_minibatch_{j}.pt")
+                # atti_dfunction_ckpt_path = os.path.join(run.public.run_dir, f"atti_dfunction_checkpoint_episode_{i}.pt")
+                atti_dynamics_ckpt_path = os.path.join(run.public.run_dir, f"atti_dynamics_checkpoint_minibatch_{j}.pt")
+                atti_controller_ckpt_path = os.path.join(run.public.run_dir, f"atti_controller_checkpoint_minibatch_{j}.pt")
+                torch.save(d_learning.pos_lyapunov.state_dict(), pos_lyapunov_ckpt_path)
+                # torch.save(d_learning.pos_dfunction.state_dict(), pos_dfunction_ckpt_path)
+                torch.save(d_learning.pos_dynamics.state_dict(), pos_dynamics_ckpt_path)
+                torch.save(d_learning.pos_controller.state_dict(), pos_controller_ckpt_path)
+                torch.save(d_learning.atti_lyapunov.state_dict(), atti_lyapunov_ckpt_path)
+                # torch.save(d_learning.atti_dfunction.state_dict(), atti_dfunction_ckpt_path)
+                torch.save(d_learning.atti_dynamics.state_dict(), atti_dynamics_ckpt_path)
+                torch.save(d_learning.atti_controller.state_dict(), atti_controller_ckpt_path)
+            print(f"model saved in minibatch{j}")
 
         if max_iters > 0 and i >= max_iters - 1:
             break 
 
         if save_interval > 0 and (i-1) % save_interval == 0:
             pos_lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"pos_lyapunov_checkpoint_episode_{i}.pt")
-            pos_dfunction_ckpt_path = os.path.join(run.public.run_dir, f"pos_dfunction_checkpoint_episode_{i}.pt")
+            # pos_dfunction_ckpt_path = os.path.join(run.public.run_dir, f"pos_dfunction_checkpoint_episode_{i}.pt")
+            pos_dynamics_ckpt_path = os.path.join(run.public.run_dir, f"pos_dynamics_checkpoint_episode_{i}.pt")
             pos_controller_ckpt_path = os.path.join(run.public.run_dir, f"pos_controller_checkpoint_episode_{i}.pt")
             atti_lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"atti_lyapunov_checkpoint_episode_{i}.pt")
-            atti_dfunction_ckpt_path = os.path.join(run.public.run_dir, f"atti_dfunction_checkpoint_episode_{i}.pt")
+            # atti_dfunction_ckpt_path = os.path.join(run.public.run_dir, f"atti_dfunction_checkpoint_episode_{i}.pt")
+            atti_dynamics_ckpt_path = os.path.join(run.public.run_dir, f"atti_dynamics_checkpoint_episode_{i}.pt")
             atti_controller_ckpt_path = os.path.join(run.public.run_dir, f"atti_controller_checkpoint_episode_{i}.pt")
             torch.save(d_learning.pos_lyapunov.state_dict(), pos_lyapunov_ckpt_path)
-            torch.save(d_learning.pos_dfunction.state_dict(), pos_dfunction_ckpt_path)
+            # torch.save(d_learning.pos_dfunction.state_dict(), pos_dfunction_ckpt_path)
+            torch.save(d_learning.pos_dynamics.state_dict(), pos_dynamics_ckpt_path)
             torch.save(d_learning.pos_controller.state_dict(), pos_controller_ckpt_path)
             torch.save(d_learning.atti_lyapunov.state_dict(), atti_lyapunov_ckpt_path)
-            torch.save(d_learning.atti_dfunction.state_dict(), atti_dfunction_ckpt_path)
+            # torch.save(d_learning.atti_dfunction.state_dict(), atti_dfunction_ckpt_path)
+            torch.save(d_learning.atti_dynamics.state_dict(), atti_dynamics_ckpt_path)
             torch.save(d_learning.atti_controller.state_dict(), atti_controller_ckpt_path)
             print(f"model saved in episode{i}")
 
     pos_lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"pos_lyapunov_checkpoint_episode_final.pt")
-    pos_dfunction_ckpt_path = os.path.join(run.public.run_dir, f"pos_dfunction_checkpoint_episode_final.pt")
+    # pos_dfunction_ckpt_path = os.path.join(run.public.run_dir, f"pos_dfunction_checkpoint_episode_final.pt")
+    pos_dynamics_ckpt_path = os.path.join(run.public.run_dir, f"pos_dynamics_checkpoint_episode_final.pt")
     pos_controller_ckpt_path = os.path.join(run.public.run_dir, f"pos_controller_checkpoint_episode_final.pt")
     atti_lyapunov_ckpt_path = os.path.join(run.public.run_dir, f"atti_lyapunov_checkpoint_episode_final.pt")
-    atti_dfunction_ckpt_path = os.path.join(run.public.run_dir, f"atti_dfunction_checkpoint_episode_final.pt")
+    # atti_dfunction_ckpt_path = os.path.join(run.public.run_dir, f"atti_dfunction_checkpoint_episode_final.pt")
+    atti_dynamics_ckpt_path = os.path.join(run.public.run_dir, f"atti_dynamics_checkpoint_episode_final.pt")
     atti_controller_ckpt_path = os.path.join(run.public.run_dir, f"atti_controller_checkpoint_episode_final.pt")
     torch.save(d_learning.pos_lyapunov.state_dict(), pos_lyapunov_ckpt_path)
-    torch.save(d_learning.pos_dfunction.state_dict(), pos_dfunction_ckpt_path)
+    # torch.save(d_learning.pos_dfunction.state_dict(), pos_dfunction_ckpt_path)
+    torch.save(d_learning.pos_dynamics.state_dict(), pos_dynamics_ckpt_path)
     torch.save(d_learning.pos_controller.state_dict(), pos_controller_ckpt_path)
     torch.save(d_learning.atti_lyapunov.state_dict(), atti_lyapunov_ckpt_path)
-    torch.save(d_learning.atti_dfunction.state_dict(), atti_dfunction_ckpt_path)
+    # torch.save(d_learning.atti_dfunction.state_dict(), atti_dfunction_ckpt_path)
+    torch.save(d_learning.atti_dynamics.state_dict(), atti_dynamics_ckpt_path)
     torch.save(d_learning.atti_controller.state_dict(), atti_controller_ckpt_path)
     print(f"final model saved to ",run.public.run_dir)
 
@@ -191,7 +230,8 @@ def main(cfg):
     )
     trajs = trajs.detach().clone()
     trajs = tensordict_next_hierarchical_control(trajs)
-    # d_learning.eval_pos_lyapunov(trajs, run) 
+    
+    d_learning.eval_pos_lyapunov(trajs, run) 
     d_learning.eval_atti_lyapunov(trajs, run)
     d_learning.eval_atti_dfunction(trajs, run)  
     env.enable_render(not cfg.headless)
